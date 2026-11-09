@@ -25,6 +25,8 @@ if vg_project_files "$PACKAGE_ROOT"; then
 fi
 [ ! -d "$PACKAGE_ROOT/extension" ] || [ -f "$PACKAGE_ROOT/SHA256SUMS" ] || vg_die '릴리스의 SHA256SUMS가 없습니다. 공식 릴리스 ZIP을 다시 받아 주세요.'
 vg_verify_package "$PACKAGE_ROOT"
+vg_load_source_history "$target"
+vg_validate_source_history
 parent="${target%/*}"
 mkdir -p -- "$parent"
 vg_no_symlink_ancestors "$parent"
@@ -49,7 +51,8 @@ elif vg_project_files "$PACKAGE_ROOT"; then
   command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 || vg_die '소스 빌드에는 Node.js 22 이상과 npm이 필요합니다. 도구 설치 없이 사용하려면 릴리스 ZIP을 받으세요.'
   node -e 'if (Number(process.versions.node.split(".")[0]) < 22) process.exit(1)' || vg_die 'Node.js 22 이상이 필요합니다.'
   vg_mark_source "$PACKAGE_ROOT"
-  printf '%s\n' "$PACKAGE_ROOT" > "$stage/source-root.txt"
+  vg_add_source_root "$PACKAGE_ROOT"
+  vg_validate_source_history
   (cd -- "$PACKAGE_ROOT" && npm ci --ignore-scripts --cache "$stage/cache/npm" && npm run build) || vg_die '소스 빌드에 실패했습니다. 기존 설치는 유지됩니다.'
   payload="$PACKAGE_ROOT/dist"
 else
@@ -62,9 +65,8 @@ cp -R -- "$payload" "$stage/extension"
 cp -- "$SCRIPT_DIR/uninstall.sh" "$SCRIPT_DIR/installation-common.sh" "$stage/scripts/"
 cp -- "$PACKAGE_ROOT/uninstall.command" "$stage/uninstall.command"
 chmod 700 "$stage/uninstall.command" "$stage/scripts/uninstall.sh"
-if [ ! -f "$stage/source-root.txt" ] && [ -f "$target/source-root.txt" ] && [ ! -L "$target/source-root.txt" ]; then
-  cp -- "$target/source-root.txt" "$stage/source-root.txt"
-fi
+vg_validate_source_history
+vg_write_source_history "$stage"
 if [ -d "$target" ]; then
   backup="$(mktemp -d "$parent/.video-grabber-backup.XXXXXX")"
   mv -- "$target" "$backup/installation"

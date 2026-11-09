@@ -20,23 +20,14 @@ while [ "$#" -gt 0 ]; do
 done
 vg_validate_target "$target"
 target="$VG_TARGET"
-source_root=''
-if [ -f "$target/source-root.txt" ]; then
-  [ ! -L "$target/source-root.txt" ] || vg_die '소스 경로 기록이 심볼릭 링크입니다.'
-  recorded_source="$(cat "$target/source-root.txt")"
-  if [ -e "$recorded_source" ]; then
-    vg_source_owned "$recorded_source" || vg_die '기록된 소스 폴더의 소유 표시가 일치하지 않아 삭제하지 않습니다.'
-    source_root="$recorded_source"
-  fi
-fi
+vg_load_source_history "$target"
 # A launcher run from its own checkout can also clean pre-installer build artifacts.
 if vg_project_files "$PACKAGE_ROOT" && { [ -d "$PACKAGE_ROOT/.git" ] || [ -f "$PACKAGE_ROOT/.git" ] || vg_source_owned "$PACKAGE_ROOT"; }; then
   vg_no_symlink_ancestors "$PACKAGE_ROOT"
-  source_root="$PACKAGE_ROOT"
+  if ! vg_has_source_root "$PACKAGE_ROOT"; then VG_DIRECT_SOURCE_ROOT="$PACKAGE_ROOT"; fi
+  vg_add_source_root "$PACKAGE_ROOT" 0
 fi
-if [ -n "$source_root" ]; then
-  for item in node_modules dist artifacts fixtures/media .cache .logs; do vg_no_symlink_ancestors "$source_root/$item"; done
-fi
+vg_validate_source_history
 if [ "$browser_removed" -eq 0 ]; then
   extension="$target/extension"
   [ -d "$extension" ] || extension="$PACKAGE_ROOT/extension"
@@ -50,10 +41,15 @@ if [ "$browser_removed" -eq 0 ]; then
   IFS= read -r confirmed
   [ "$confirmed" = REMOVE ] || vg_die '제거를 취소했습니다. 파일은 유지됩니다.'
 fi
-if [ -n "$source_root" ]; then
+# Validate the complete set again after browser confirmation before deleting any
+# root. An invalid later entry must never leave earlier checkouts half-cleaned.
+vg_validate_source_history
+vg_validate_target "$target"
+while IFS= read -r source_root; do
+  [ -n "$source_root" ] && [ -e "$source_root" ] || continue
   vg_source_artifacts "$source_root"
   vg_note "소스 빌드 의존성·캐시·로그·테스트 산출물 삭제: $source_root"
-fi
+done <<< "$VG_SOURCE_ROOTS"
 if [ -e "$target" ]; then
   # Recheck ownership immediately before the bounded recursive deletion.
   vg_validate_target "$target"

@@ -36,6 +36,36 @@ async function checksums(root: string) {
 function run(bundle: string, script: 'install' | 'uninstall', target: string, options: string[] = []) {
   return spawnSync('/bin/bash', [resolve(bundle, 'scripts', `${script}.sh`), '--no-open', '--target-root', target, ...options], { encoding: 'utf8' });
 }
+async function sourceFixture(root: string, name: string) {
+  const bundle = await fixture(resolve(root, name));
+  await rm(resolve(bundle, 'extension'), { recursive: true });
+  await rm(resolve(bundle, 'SHA256SUMS'));
+  for (const directory of ['.git', 'src', 'public']) await mkdir(resolve(bundle, directory));
+  await writeFile(resolve(bundle, 'src/background.ts'), 'source');
+  await writeFile(resolve(bundle, '.git/keep'), 'git data');
+  await writeFile(resolve(bundle, 'saved-video.mp4'), 'user video');
+  await writeFile(resolve(bundle, 'public/manifest.json'), '{"name":"Video Grabber","manifest_version":3,"version":"1.0.0"}');
+  await writeFile(resolve(bundle, 'package.json'), '{"name":"video-grabber"}');
+  await writeFile(resolve(bundle, 'package-lock.json'), '{}');
+  return bundle;
+}
+async function fakeNpm(root: string) {
+  const bin = resolve(root, 'fake-npm-bin');
+  await mkdir(bin);
+  await writeFile(resolve(bin, 'npm'), '#!/bin/bash\nset -eu\nprintf "%s\\n" "$*" >> npm-invocations.txt\nif [ "$1" = ci ]; then mkdir -p node_modules; printf dependency > node_modules/installed; else mkdir -p dist; cp public/manifest.json dist/manifest.json; fi\n');
+  await chmod(resolve(bin, 'npm'), 0o700);
+  return bin;
+}
+function installSource(bundle: string, target: string, bin: string) {
+  return spawnSync('/bin/bash', [resolve(bundle, 'scripts/install.sh'), '--no-open', '--target-root', target], {
+    encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+}
+async function assertSourcePreserved(path: string) {
+  assert.equal(await readFile(resolve(path, 'src/background.ts'), 'utf8'), 'source');
+  assert.equal(await readFile(resolve(path, '.git/keep'), 'utf8'), 'git data');
+  assert.equal(await readFile(resolve(path, 'saved-video.mp4'), 'utf8'), 'user video');
+}
 
 test('release staging needs no npm, updates atomically, and uninstall removes owned payload and logs', async () => {
   const root = await temporary();
@@ -179,7 +209,7 @@ test('installed uninstaller verifies recorded source ownership and removes its b
     });
     assert.equal(installed.status, 0, installed.stderr);
     assert.match(await readFile(resolve(bundle, 'npm-invocations.txt'), 'utf8'), /ci --ignore-scripts --cache/);
-    assert.equal(await readFile(resolve(target, 'source-root.txt'), 'utf8'), `${bundle}\n`);
+    assert.equal(await readFile(resolve(target, 'source-roots.txt'), 'utf8'), `${bundle}\n`);
     await writeFile(resolve(bundle, '.video-grabber-build-root'), 'foreign marker');
     let result = run(target, 'uninstall', target, ['--browser-removed']);
     assert.notEqual(result.status, 0);
@@ -228,5 +258,135 @@ test('source installs reject destinations inside the checkout before npm or stag
       assert.equal(await exists(resolve(bundle, 'npm-was-run')), false, 'npm must never run for a rejected destination');
       assert.equal(await exists(resolve(bundle, '.video-grabber-build-root')), false, 'source marker must not be created before validation');
     }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('source A to B to release upgrades retain deduplicated provenance and remove artifacts from every checkout', async () => {
+  const root = await temporary();
+  try {
+    const sourceA = await sourceFixture(root, 'source-a');
+    const sourceB = await sourceFixture(root, 'source-b');
+    const release = await fixture(resolve(root, 'release'));
+    const bin = await fakeNpm(root);
+    const target = resolve(root, 'managed/video-grabber');
+    for (const source of [sourceA, sourceB, sourceA]) {
+      const installed = installSource(source, target, bin);
+      assert.equal(installed.status, 0, installed.stderr);
+    }
+    assert.equal(await readFile(resolve(target, 'source-roots.txt'), 'utf8'), `${sourceA}\n${sourceB}\n`);
+    for (const source of [sourceA, sourceB]) {
+      for (const name of ['artifacts', 'fixtures/media', '.cache', '.logs']) {
+        await mkdir(resolve(source, name), { recursive: true });
+        await writeFile(resolve(source, name, 'generated'), 'artifact');
+      }
+    }
+    const upgraded = run(release, 'install', target);
+    assert.equal(upgraded.status, 0, upgraded.stderr);
+    assert.equal(await readFile(resolve(target, 'source-roots.txt'), 'utf8'), `${sourceA}\n${sourceB}\n`);
+    const removed = run(target, 'uninstall', target, ['--browser-removed']);
+    assert.equal(removed.status, 0, removed.stderr);
+    assert.equal(await exists(target), false);
+    for (const source of [sourceA, sourceB]) {
+      for (const name of ['node_modules', 'dist', 'artifacts', 'fixtures/media', '.cache', '.logs', '.video-grabber-build-root']) {
+        assert.equal(await exists(resolve(source, name)), false, `${source}/${name}`);
+      }
+      await assertSourcePreserved(source);
+    }
+    assert.equal(await exists(resolve(release, 'extension/manifest.json')), true);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('legacy single-source metadata is imported on upgrade and read by a checkout uninstaller alongside its own artifacts', async () => {
+  const root = await temporary();
+  try {
+    const sourceA = await sourceFixture(root, 'legacy-source');
+    const sourceB = await sourceFixture(root, 'launcher-source');
+    const release = await fixture(resolve(root, 'release'));
+    const bin = await fakeNpm(root);
+    const target = resolve(root, 'managed/video-grabber');
+    const installed = installSource(sourceA, target, bin);
+    assert.equal(installed.status, 0, installed.stderr);
+    await rm(resolve(target, 'source-roots.txt'));
+    await writeFile(resolve(target, 'source-root.txt'), `${sourceA}\n`);
+    const upgraded = run(release, 'install', target);
+    assert.equal(upgraded.status, 0, upgraded.stderr);
+    assert.equal(await readFile(resolve(target, 'source-roots.txt'), 'utf8'), `${sourceA}\n`);
+    assert.equal(await exists(resolve(target, 'source-root.txt')), false);
+    // Also exercise direct removal from an old single-entry installation.
+    await rm(resolve(target, 'source-roots.txt'));
+    await writeFile(resolve(target, 'source-root.txt'), `${sourceA}\n`);
+    for (const name of ['node_modules', 'dist']) {
+      await mkdir(resolve(sourceB, name));
+      await writeFile(resolve(sourceB, name, 'artifact'), 'generated before installer');
+    }
+    const removed = run(sourceB, 'uninstall', target, ['--browser-removed']);
+    assert.equal(removed.status, 0, removed.stderr);
+    assert.equal(await exists(target), false);
+    for (const source of [sourceA, sourceB]) {
+      assert.equal(await exists(resolve(source, 'node_modules')), false);
+      assert.equal(await exists(resolve(source, 'dist')), false);
+      await assertSourcePreserved(source);
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('invalid later source history aborts all cleanup and release replacement; absent roots are skipped safely', async () => {
+  const root = await temporary();
+  try {
+    const sourceA = await sourceFixture(root, 'source-a');
+    const sourceB = await sourceFixture(root, 'source-b');
+    const release = await fixture(resolve(root, 'release'));
+    const bin = await fakeNpm(root);
+    const target = resolve(root, 'managed/video-grabber');
+    for (const source of [sourceA, sourceB]) assert.equal(installSource(source, target, bin).status, 0);
+    const history = `${sourceA}\n${sourceB}\n`;
+    const metadata = resolve(target, 'source-roots.txt');
+    const markerB = resolve(sourceB, '.video-grabber-build-root');
+    async function expectRefusal() {
+      assert.notEqual(run(target, 'uninstall', target, ['--browser-removed']).status, 0);
+      assert.notEqual(run(release, 'install', target).status, 0);
+      assert.equal(await exists(resolve(sourceA, 'node_modules/installed')), true);
+      assert.equal(await exists(resolve(sourceA, 'dist/manifest.json')), true);
+      assert.equal(await exists(resolve(sourceA, '.video-grabber-build-root')), true);
+      assert.equal(await exists(resolve(target, 'extension/manifest.json')), true);
+      await assertSourcePreserved(sourceA);
+      await assertSourcePreserved(sourceB);
+    }
+    await writeFile(markerB, 'foreign ownership');
+    await expectRefusal();
+    await writeFile(markerB, `video-grabber-build-v1\n${sourceB}\n`);
+    await writeFile(metadata, '');
+    await expectRefusal();
+    await writeFile(metadata, `${sourceA}\n${sourceB}\r\n`);
+    await expectRefusal();
+    await writeFile(metadata, history);
+    const outside = resolve(root, 'unrelated');
+    await mkdir(outside);
+    await writeFile(resolve(outside, 'keep.txt'), 'unrelated');
+    await rm(resolve(sourceB, 'node_modules'), { recursive: true });
+    await symlink(outside, resolve(sourceB, 'node_modules'));
+    await expectRefusal();
+    assert.equal(await readFile(resolve(outside, 'keep.txt'), 'utf8'), 'unrelated');
+    await rm(resolve(sourceB, 'node_modules'));
+    await mkdir(resolve(sourceB, 'node_modules'));
+    await rm(metadata);
+    await writeFile(resolve(root, 'history.txt'), history);
+    await symlink(resolve(root, 'history.txt'), metadata);
+    await expectRefusal();
+    await rm(metadata);
+    const dangling = resolve(root, 'dangling-source');
+    await symlink(resolve(root, 'missing'), dangling);
+    await writeFile(metadata, `${history}${dangling}\n`);
+    await expectRefusal();
+    await writeFile(metadata, `${history}${resolve(root, 'nonexistent-checkout')}\n`);
+    const removed = run(target, 'uninstall', target, ['--browser-removed']);
+    assert.equal(removed.status, 0, removed.stderr);
+    for (const source of [sourceA, sourceB]) {
+      assert.equal(await exists(resolve(source, 'node_modules')), false);
+      assert.equal(await exists(resolve(source, 'dist')), false);
+      await assertSourcePreserved(source);
+    }
+    assert.equal(await readFile(resolve(outside, 'keep.txt'), 'utf8'), 'unrelated');
+    assert.equal(await exists(target), false);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

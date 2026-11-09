@@ -2,6 +2,8 @@
 # Shared filesystem guardrails. Never edits Chrome profiles or enterprise policies.
 VG_INSTALL_MARKER='video-grabber-install-v1'
 VG_SOURCE_MARKER='video-grabber-build-v1'
+VG_SOURCE_ROOTS=''
+VG_DIRECT_SOURCE_ROOT=''
 
 vg_die() { printf 'Video Grabber: %s\n' "$*" >&2; exit 1; }
 vg_note() { printf '%s\n' "$*"; }
@@ -77,12 +79,84 @@ vg_source_owned() {
   [ "$(cat "$path/.video-grabber-build-root")" = "$(printf '%s\n%s' "$VG_SOURCE_MARKER" "$path")" ]
 }
 
-vg_source_artifacts() {
-  # First validate every deletion target. A bad entry prevents partial cleanup.
+vg_validate_source_artifacts() {
   local path="$1" item
+  vg_no_symlink_ancestors "$path/.video-grabber-build-root"
   for item in node_modules dist artifacts fixtures/media .cache .logs; do
     vg_no_symlink_ancestors "$path/$item"
   done
+}
+
+vg_has_source_root() {
+  local candidate
+  while IFS= read -r candidate; do
+    [ "$candidate" != "$1" ] || return 0
+  done <<< "$VG_SOURCE_ROOTS"
+  return 1
+}
+
+vg_add_source_root() {
+  local path="$1" require_owned="${2:-1}"
+  # Check even missing entries: a dangling symlink or malformed path must not
+  # be silently discarded as an absent checkout.
+  vg_no_symlink_ancestors "$path"
+  [ -e "$path" ] || return 0
+  if [ "$require_owned" -eq 1 ]; then
+    vg_source_owned "$path" || vg_die '기록된 소스 폴더의 소유 표시가 일치하지 않아 변경하지 않습니다.'
+  else vg_project_files "$path" || vg_die '확인된 Video Grabber 소스 폴더가 아닙니다.'
+  fi
+  vg_validate_source_artifacts "$path"
+  vg_has_source_root "$path" && return 0
+  VG_SOURCE_ROOTS="${VG_SOURCE_ROOTS}${VG_SOURCE_ROOTS:+$'\n'}$path"
+}
+
+vg_load_source_history() {
+  local root="$1" metadata recorded
+  for metadata in "$root/source-root.txt" "$root/source-roots.txt"; do
+    if [ ! -e "$metadata" ] && [ ! -L "$metadata" ]; then continue; fi
+    [ -f "$metadata" ] && [ ! -L "$metadata" ] || vg_die '소스 경로 기록은 일반 파일이어야 합니다.'
+    [ -s "$metadata" ] || vg_die '소스 경로 기록이 비어 있어 변경하지 않습니다.'
+    if [ "${metadata##*/}" = source-root.txt ]; then
+      # Legacy metadata is exactly one path; embedded newlines are invalid.
+      recorded="$(cat "$metadata")"
+      vg_add_source_root "$recorded"
+    else
+      while IFS= read -r recorded || [ -n "$recorded" ]; do
+        [ -n "$recorded" ] || vg_die '소스 경로 기록에 빈 항목이 있습니다.'
+        vg_add_source_root "$recorded"
+      done < "$metadata"
+    fi
+  done
+}
+
+vg_validate_source_history() {
+  local path other item
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    vg_no_symlink_ancestors "$path"
+    [ -e "$path" ] || continue
+    if [ "$path" = "$VG_DIRECT_SOURCE_ROOT" ]; then
+      vg_project_files "$path" || vg_die '실행 중인 소스 폴더가 변경되어 정리를 중단했습니다.'
+    else vg_source_owned "$path" || vg_die '기록된 소스 폴더의 소유 표시가 일치하지 않아 변경하지 않습니다.'
+    fi
+    vg_validate_source_artifacts "$path"
+    while IFS= read -r other; do
+      [ -n "$other" ] || continue
+      for item in node_modules dist artifacts fixtures/media .cache .logs; do
+        case "$other/" in "$path/$item/"*) vg_die '기록된 소스 폴더가 다른 소스의 삭제 대상 안에 있어 정리를 중단했습니다.' ;; esac
+      done
+    done <<< "$VG_SOURCE_ROOTS"
+  done <<< "$VG_SOURCE_ROOTS"
+}
+
+vg_write_source_history() {
+  local root="$1"
+  [ -z "$VG_SOURCE_ROOTS" ] || printf '%s\n' "$VG_SOURCE_ROOTS" > "$root/source-roots.txt"
+}
+
+vg_source_artifacts() {
+  local path="$1" item
+  vg_validate_source_artifacts "$path"
   for item in node_modules dist artifacts fixtures/media .cache .logs; do
     [ ! -e "$path/$item" ] || rm -rf -- "$path/$item"
   done
