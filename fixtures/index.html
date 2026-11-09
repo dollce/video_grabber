@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>Video Grabber 로컬 검증</title></head>
+<body><h1>Video Grabber 로컬 재생 페이지</h1>
+<p>4초 테스트 패턴과 440 Hz 오디오입니다. 모드를 선택해 재생한 뒤 확장 아이콘을 누르세요.</p>
+<select id="mode"><option value="direct">MP4 영상과 오디오</option><option value="hls">HLS 분리 영상/오디오</option><option value="fmp4">HLS fMP4</option><option value="range">HLS byte range</option><option value="dash">DASH 분리 영상/오디오</option><option value="separate">별도 MP4 / M4A</option></select>
+<button id="play">재생</button><p id="status"></p>
+<video id="video" controls muted width="640"></video><audio id="audio" controls></audio>
+<script src="/hls.js"></script><script src="/player.js"></script></body></html>

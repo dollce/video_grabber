@@ -1,0 +1,33 @@
+{
+  "name": "video-grabber",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:e2e": "node scripts/e2e.mjs",
+    "fixtures": "node scripts/fixtures.mjs",
+    "check": "npm run typecheck && npm test && npm run build",
+    "verify:vendor": "node scripts/verify-vendor.mjs",
+    "security:check": "node scripts/security-check.mjs",
+    "release:package": "node scripts/package-release.mjs"
+  },
+  "dependencies": {
+    "@ffmpeg/ffmpeg": "0.12.15",
+    "fast-xml-parser": "5.12.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "0.1.31",
+    "@types/node": "24.10.1",
+    "esbuild": "0.27.0",
+    "hls.js": "1.7.4",
+    "playwright": "1.56.1",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
+  }
+}

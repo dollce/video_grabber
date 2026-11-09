@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Video Grabber",
+  "version": "1.0.0",
+  "description": "재생 페이지의 미디어 트래픽을 감지하고 영상과 오디오를 저장합니다.",
+  "minimum_chrome_version": "125",
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "storage",
+    "webRequest",
+    "downloads",
+    "unlimitedStorage",
+    "debugger"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "이 페이지의 동영상 수집"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; base-uri 'none';"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1d9Ai0kYCTssEknrJ0MzYssCiLwJQY2RWn/Q/+1a54b2LvcdUwK35JtUwKioL6v9HcHceNMRbJvr1wTeUGbqQMQESauurCqxqawdUUZjKuVSII2cra40LRpZcnHv6jSM+eTS4PyfCu3UEmK2mRJphVTW22BmILnI5O/tMKo0ppBGCwWUxJEY02ZVm3jQSWzL2gR2MLVUfi/rWTABR265F8fU8f6/d9mylqyU5sa2pg7NAFFE4onfBdelHmT97PxlBKjhokp3L+w95mrfWH4ziT17K9fRRg2x42oDAoh6Jms4NKxeYmwDJ9IOOwHW1Pmk8+qX0fsLoNhN1L2J9AETMQIDAQAB"
+}

@@ -1,0 +1,680 @@
+{
+  "reviewDate": "2026-11-10",
+  "scope": "The 56 open/open-unimportant entries on the Debian FFmpeg tracker, compared with the pinned source and restricted build. Not a claim of exhaustive vulnerability discovery.",
+  "sourceIndex": "https://security-tracker.debian.org/tracker/source-package/ffmpeg",
+  "component": "video-grabber-ffmpeg-core",
+  "version": "5.1.10-vg1",
+  "ffmpegCommit": "19feb712f5c1821d8a3fa1ad63c5bd2e3b9672eb",
+  "binaryProvenance": "../vendor/ffmpeg-core/manifest.json",
+  "advisories": [
+    {
+      "id": "CVE-2026-120247",
+      "status": "disabled",
+      "component": "huffyuv decoder",
+      "assessment": "Video decoder excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-120247",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/24869",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/f6577bd9cf3e49d522242771184834d6b0c157fd",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/7c73707355708c846f718cca90096bc1a33c8989"
+      ]
+    },
+    {
+      "id": "CVE-2026-120246",
+      "status": "disabled",
+      "component": "cdxl decoder",
+      "assessment": "Video decoder excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-120246",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/24856",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/e8189515050ae2e4e204f1f0aa9d0cdca3169903",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/47313ad3f9f33b892384b976fb7c09b3c85fd74e"
+      ]
+    },
+    {
+      "id": "CVE-2026-120245",
+      "status": "disabled",
+      "component": "sunrast decoder",
+      "assessment": "Image decoder excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-120245",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/24877",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/ceb0dd9f1e76a2a2c903fa942e47e8164e0dbedf",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/356a391bf57df2fb80fd61f2821c8c83d15ce180"
+      ]
+    },
+    {
+      "id": "CVE-2026-120244",
+      "status": "disabled",
+      "component": "pcx decoder",
+      "assessment": "Image decoder excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-120244",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/24868",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/50617fce073ca3e360388b38a83341e37db92b80",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/ecd5dfc308a164757e7f25b1afefd8db21b43cf9"
+      ]
+    },
+    {
+      "id": "CVE-2026-120243",
+      "status": "disabled",
+      "component": "g2m decoder",
+      "assessment": "Video decoder excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-120243",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/24858",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/edad2d0dafcf44fa315eab716fd0183ce808053b"
+      ]
+    },
+    {
+      "id": "CVE-2026-120210",
+      "status": "disabled",
+      "component": "imf demuxer",
+      "assessment": "Only selected media demuxers enabled; IMF excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-120210",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/25341"
+      ]
+    },
+    {
+      "id": "CVE-2026-107697",
+      "status": "patched",
+      "component": "hls.c child playlist opening",
+      "assessment": "Upstream protocol-policy fix backported",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-107697",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/23602df9cd1b485c45ba6f533d3b85569de3f323",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/01044d04536eec6e2f5f48ef404cf45d15feb461",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/191715f0232cee64402c3e7733f28ff4061224b6"
+      ]
+    },
+    {
+      "id": "CVE-2026-107696",
+      "status": "disabled",
+      "component": "rtsp.c",
+      "assessment": "RTSP and native networking excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-107696",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/24902"
+      ]
+    },
+    {
+      "id": "CVE-2026-107695",
+      "status": "patched",
+      "component": "hls.c playlist recursion",
+      "assessment": "Upstream media/master tag separation fix backported",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-107695",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/c364ab176f722bdabc886845e770c9eacbc1e3e5",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/0e6eef35517af086419c5157980e926a81070c2a",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/a4ddaba8bb7811b1a3afaad59fe6555e720d4754",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/23618"
+      ]
+    },
+    {
+      "id": "CVE-2026-107678",
+      "status": "patched",
+      "component": "encryption_info.c; mov_read_pssh",
+      "assessment": "Iterative-free upstream fix plus project rejection of PSSH before list construction",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-107678",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/24593"
+      ]
+    },
+    {
+      "id": "CVE-2026-107677",
+      "status": "disabled",
+      "component": "dashdec.c",
+      "assessment": "Native DASH demuxer excluded; application parses MPD and concatenates fetched segments",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-107677",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/24592",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/ed27bfcbbbc0872c0195eaf4dd2c0c93b9f1778e"
+      ]
+    },
+    {
+      "id": "CVE-2026-107676",
+      "status": "absent-code",
+      "component": "hdr_dynamic_metadata.c",
+      "assessment": "av_dynamic_hdr_plus_to_t35 does not exist in 5.1.10; source checked",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-107676",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/24590",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/2c2f6e96e31795ae95a8f8323a493ffbc493111f",
+        "https://github.com/FFmpeg/FFmpeg/blob/n5.1.10/libavutil/hdr_dynamic_metadata.c"
+      ]
+    },
+    {
+      "id": "CVE-2026-107675",
+      "status": "disabled",
+      "component": "libssh SFTP",
+      "assessment": "External libssh and native networking excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-107675",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/24384",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/2b822b7fb6ed195546bc9fd9bdb794e98222bdce"
+      ]
+    },
+    {
+      "id": "CVE-2026-90816",
+      "status": "disabled",
+      "component": "hlsproto.c",
+      "assessment": "Legacy HLS protocol excluded; distinct from enabled HLS demuxer",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-90816",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/issues/21492",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/64fafd63f0b4ebf8dbbdbdc2296f21a03548b5fc"
+      ]
+    },
+    {
+      "id": "CVE-2026-75146",
+      "status": "disabled",
+      "component": "dashdec.c",
+      "assessment": "Native DASH demuxer excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-75146",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/24093",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/65b0dab903e5975e036b30ecc58f5935d4f151e0",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/999f8ba75ce0bf1167677de7e11a5af678fdb866"
+      ]
+    },
+    {
+      "id": "CVE-2026-75144",
+      "status": "disabled",
+      "component": "rtpenc_vc2hq.c",
+      "assessment": "RTP muxer excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-75144",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/24091",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/1cdeb3c4e7f1f8566d846b9b451e01c376398818",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/1afd5c3ddafda4209e0881cd30684b919e99de7c"
+      ]
+    },
+    {
+      "id": "CVE-2026-75143",
+      "status": "disabled",
+      "component": "librist.c",
+      "assessment": "External librist and native networking excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-75143",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/24089",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/1c10bcc2e17255dacb717a25ab3db142ce390602",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/8880a174d08131f94f58a0492d1c8c6d68b74f67"
+      ]
+    },
+    {
+      "id": "CVE-2026-75142",
+      "status": "disabled",
+      "component": "mpegenc.c",
+      "assessment": "MPEG-PS muxers excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-75142",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/24087",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/9d786e4b5e9b8482651928574de33772aeee7be1",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/b274f0d21ba684446fd59b49e00f3f8e9ed954df"
+      ]
+    },
+    {
+      "id": "CVE-2026-75141",
+      "status": "hardened",
+      "component": "hevc.c hvcC count",
+      "assessment": "UINT16_MAX guard backported; 5.1.10 uses a different write order, so the newer heap-overflow behavior was not established",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-75141",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/24088",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/acf5d7cdc1f9ae8752c23e1ea8d7f355ed780781",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/c7132ef8f63c383d11a00a9e3034748d8dd15fb3"
+      ]
+    },
+    {
+      "id": "CVE-2026-70632",
+      "status": "disabled",
+      "component": "cfhd decoder",
+      "assessment": "Video decoder excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-70632",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/23898",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/1006a2151236f9235bf02822f263b3fb0532111e",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/16b2049d4d5222db6cd7c031409058571c94f6a9",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/db05df9d135fb56a4babb836d5e9f5c1d984e087"
+      ]
+    },
+    {
+      "id": "CVE-2026-70631",
+      "status": "disabled",
+      "component": "tiff decoder",
+      "assessment": "Image decoder and external zlib excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-70631",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/23899",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/a991b1fecbd8c9e6f4fc31c191bd12e4be27dbf7",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/2f234ea34c81288e3840fca632dd16481d8de39f",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/3c287af3affe1286350faa69c02bcc5d49de18bb"
+      ]
+    },
+    {
+      "id": "CVE-2026-70630",
+      "status": "disabled",
+      "component": "screenpresso decoder",
+      "assessment": "Video decoder excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-70630",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/23896",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/9a3202a98b2e095b54dd784c3e01a09a676fc3fa",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/705890061467ad550ecc1dad5eea07f28ccfb43e",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/c22667d0fd7916a33fd3e79685b7246fc48f1a62"
+      ]
+    },
+    {
+      "id": "CVE-2026-70629",
+      "status": "disabled",
+      "component": "rscc decoder",
+      "assessment": "Video decoder excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-70629",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/23895",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/533a6198505edd1379e1cd722852350ae4a85acc",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/cd1f545cf27ba08f6f5b31b1e92665d7874d4fd7",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/a5fe21a1a410a680fe93c33b0dd696b7e1c3aea4"
+      ]
+    },
+    {
+      "id": "CVE-2026-70628",
+      "status": "disabled",
+      "component": "dvbsub parser",
+      "assessment": "Subtitle parser excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-70628",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/23897",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/c6ec28b18cd1eb7d39e6163137367f2d1c62aa7c",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/93f2a525ec6c7b467bae68322720d10188fc6e30",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/02fc47e13f903768b75f7985a2706a6223ab4506"
+      ]
+    },
+    {
+      "id": "CVE-2026-66041",
+      "status": "absent-code",
+      "component": "vf_quirc filter",
+      "assessment": "Introduced after 5.1; filter and external quirc excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-66041",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/23625",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/4da9812e25894fb51d62a8875cfa8eb39b5e20f5",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/c20d78c6838ae62e9954163833d24fc0ed1b74a3",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/030e1401451200566a5303f35cbe1456e31dd81e"
+      ]
+    },
+    {
+      "id": "CVE-2026-66040",
+      "status": "disabled",
+      "component": "png/apng encoders",
+      "assessment": "AAC is the only encoder; image encoders excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-66040",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/23786",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/b506fafec9a19fcbc2be5271875fd4a63d6615bc",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/5185caaeb8e2c05f7369cbedf0f616601bd82d5c"
+      ]
+    },
+    {
+      "id": "CVE-2026-66039",
+      "status": "disabled",
+      "component": "mace6 decoder",
+      "assessment": "Audio decoder not in allowlist",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-66039",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/23631",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/aafb5c655edc76a753275c383ebb139feb032718",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/947c57d9e68800dd4d39f110140f8f6c34cedf80"
+      ]
+    },
+    {
+      "id": "CVE-2026-66038",
+      "status": "disabled",
+      "component": "lcl decoder",
+      "assessment": "Video decoder excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-66038",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/23626",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/e7cbfd1c507b57a806a5825b87d609963e862c8c",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/7c0b8c8594501dd904ebbb3b45bb3f6e2c745b7d"
+      ]
+    },
+    {
+      "id": "CVE-2026-66037",
+      "status": "absent-code",
+      "component": "iamf_parse.c",
+      "assessment": "IAMF parsing code absent from 5.1.10",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-66037",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/23627",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/86708357d126af84c16f80d9c57335d1e8c845c5",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/f15e730cd225763bbae68614af777560aeb449dd"
+      ]
+    },
+    {
+      "id": "CVE-2026-66036",
+      "status": "disabled",
+      "component": "vf_hqdn3d filter",
+      "assessment": "Filter excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-66036",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/23783",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/5d7112c60e6f0f0742ce47d448e6da0718a70f4c",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/62294b6a8ad2370e1435bb9985ebe6b53be14c2b"
+      ]
+    },
+    {
+      "id": "CVE-2026-65706",
+      "status": "disabled",
+      "component": "vf_swaprect filter",
+      "assessment": "Filter excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-65706",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/23779",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/a7e38b617b32f996beaa371bbf04b39907d7a527",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/b3c7ebc1edc401fd9881277fdfae93f3f24ceb81"
+      ]
+    },
+    {
+      "id": "CVE-2026-65705",
+      "status": "disabled",
+      "component": "vf_floodfill filter",
+      "assessment": "Filter excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-65705",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/23780",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/f186c50cf53aec20e9a29059cb22ca3f2d59201c",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/30a52276f9dff60fe732d8bb8d463e587ff69c94"
+      ]
+    },
+    {
+      "id": "CVE-2026-65704",
+      "status": "disabled",
+      "component": "ty demuxer; shorten decoder",
+      "assessment": "Both components excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-65704",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/23767",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/de771bd52774a52d45b0e2c82e56995a1ef40df7",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/52f7983f15678c8a6065327760d7b6eb1c9c84ed"
+      ]
+    },
+    {
+      "id": "CVE-2026-65703",
+      "status": "disabled",
+      "component": "tdsc decoder",
+      "assessment": "Video decoder excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-65703",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/23773",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/fd3ee52fab34d98a95b787d0b5ff45685766200c",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/3b85fbe89025ea696988488358dfde41a09c53c5"
+      ]
+    },
+    {
+      "id": "CVE-2026-64835",
+      "status": "disabled",
+      "component": "adx decoder",
+      "assessment": "Audio decoder not in allowlist",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-64835",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/23659",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/1836ef96846937a6cc2443698a693104f5c0b21e",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/c10e7f5dc12367d0dfcc52983d427c6766425fa8"
+      ]
+    },
+    {
+      "id": "CVE-2026-64834",
+      "status": "disabled",
+      "component": "rtpdec_asf.c",
+      "assessment": "RTP demuxer and native networking excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-64834",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/23663",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/11d5f475be95d22d5f0692220cc772b116abc632",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/3c441711a343ccf50196c70a3f0b554b52f8d9de"
+      ]
+    },
+    {
+      "id": "CVE-2026-64833",
+      "status": "disabled",
+      "component": "spdif muxer",
+      "assessment": "Muxer excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-64833",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/23661",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/6f80e2765492700622596af720534cef33dd31b4",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/385ac2fadcb4394ec4f65e5c4d3d24003e090f36"
+      ]
+    },
+    {
+      "id": "CVE-2026-64832",
+      "status": "disabled",
+      "component": "nvdec.c",
+      "assessment": "Hardware acceleration excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-64832",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/23664",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/72982f8cb5dad6252a14226d28128313eed4a5ff",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/4c6217477fc64305055b37d9d1d0d76d30e37f97",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/3d5ad47c40436dbdeaaa6601af0bb4575d5aa3c5",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/9cbcf979a587a66b280496657d00fabe301bf20f"
+      ]
+    },
+    {
+      "id": "CVE-2026-64830",
+      "status": "disabled",
+      "component": "vobsub demuxer",
+      "assessment": "Subtitle demuxer excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-64830",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/23657",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/dbd495f066a85ba96b17433f4306582aa37c3951",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/dcf8ce2802bf2be1b0c6b8d4996abca7b669978d"
+      ]
+    },
+    {
+      "id": "CVE-2026-58049",
+      "status": "disabled",
+      "component": "rasc decoder",
+      "assessment": "Video decoder excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-58049",
+      "primaryReferences": [
+        "https://github.com/bikini/exploitarium/tree/main/ffmpeg-rasc-dlta-calc-poc",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/11ff18a6c80187405fc492f9bb07ba9f2f663f76",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/f8d7795dcca36a4dd412e89cbd83e3dfec1e0d81"
+      ]
+    },
+    {
+      "id": "CVE-2026-52296",
+      "status": "disabled",
+      "component": "wmaenc.c",
+      "assessment": "AAC is the only encoder; WMA encoders excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-52296",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/22988",
+        "https://git.ffmpeg.org/gitweb/ffmpeg.git/commit/23227a444de4a8f7696f46660cdd044b460f7e47",
+        "https://git.ffmpeg.org/gitweb/ffmpeg.git/commit/d1b0069077fad943387d113322c058b3e06d0c01",
+        "https://git.ffmpeg.org/gitweb/ffmpeg.git/commit/d18354f8d4bd018eb486d18079ff0afb3b84c506",
+        "https://git.ffmpeg.org/gitweb/ffmpeg.git/commit/2437ca465fea26d141fe02e17bfa2d52468ab988"
+      ]
+    },
+    {
+      "id": "CVE-2026-38350",
+      "status": "disabled",
+      "component": "swscale output fuzzer",
+      "assessment": "Fuzzer not shipped; video decoding and scaling flow not used",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-38350",
+      "primaryReferences": [
+        "https://trac.ffmpeg.org/ticket/11686",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/20060",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/aca41d3d9327be4d6ab036f494b700118fcc04e1"
+      ]
+    },
+    {
+      "id": "CVE-2026-38347",
+      "status": "fixed-base",
+      "component": "swscale alphablend",
+      "assessment": "5.1.10 includes upstream backport 7ee2f9004bd292cbe98deea3664dc00223d4275c",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-38347",
+      "primaryReferences": [
+        "https://trac.ffmpeg.org/ticket/11692",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/20063",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/b7946098b19af4f06661213d591a5ed9cd3d26ff",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/bb88e295394e5db584063bde790bfbdba04d54ec",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/7ee2f9004bd292cbe98deea3664dc00223d4275c"
+      ]
+    },
+    {
+      "id": "CVE-2026-18393",
+      "status": "disabled",
+      "component": "tdsc decoder",
+      "assessment": "Video decoder excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-18393",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/242ff799c75f20bade946314c8d741d0887ee11c",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/031fae5c41e6200d3d9b593339be724857b2aacd"
+      ]
+    },
+    {
+      "id": "CVE-2026-13858",
+      "status": "absent-code",
+      "component": "mov_seek_stream",
+      "assessment": "5.1.10 checks sample < 0 before can_seek_to_key_sample; vulnerable newer requested_sample loop absent",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-13858",
+      "primaryReferences": [
+        "https://issues.chromium.org/issues/507090179",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/22976",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/256d93413f260e1524c2ab994dc72c4edaa0d04c",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/cb8a5ca8ab36884064ac4de5175ae82c93edfcb2",
+        "https://github.com/FFmpeg/FFmpeg/blob/n5.1.10/libavformat/mov.c"
+      ]
+    },
+    {
+      "id": "CVE-2026-8461",
+      "status": "fixed-base",
+      "component": "magicyuv decoder",
+      "assessment": "5.1.10 includes upstream backport 0216a4847e6adb922c22ad18abb8b223c6290416; decoder also excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-8461",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/23159",
+        "https://git.ffmpeg.org/gitweb/ffmpeg.git/c23d4da3128c279b714b282e6ec292e8755007e3",
+        "https://git.ffmpeg.org/gitweb/ffmpeg.git/commit/a991b3e1102824730de6b0b2afd1c7e41fbdf03d",
+        "https://git.ffmpeg.org/gitweb/ffmpeg.git/commit/15882781ac5267a653e4e55f5fa656ba9db688fd",
+        "https://git.ffmpeg.org/gitweb/ffmpeg.git/commit/0216a4847e6adb922c22ad18abb8b223c6290416"
+      ]
+    },
+    {
+      "id": "CVE-2025-52290",
+      "status": "disabled",
+      "component": "h264dec.c",
+      "assessment": "H264 decoder excluded; H264 parser is separate; reporter did not establish affected-version range",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2025-52290",
+      "primaryReferences": [
+        "https://www.openwall.com/lists/oss-security/2026/10/20/6"
+      ]
+    },
+    {
+      "id": "CVE-2025-22921",
+      "status": "disabled",
+      "component": "jpeg2000 decoder",
+      "assessment": "Image decoder excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2025-22921",
+      "primaryReferences": [
+        "https://trac.ffmpeg.org/ticket/11393",
+        "https://git.ffmpeg.org/gitweb/ffmpeg.git/commit/7f9c7f9849a2155224711f0ff57ecdac6e4bfb57",
+        "https://git.ffmpeg.org/gitweb/ffmpeg.git/commit/3a18d60f65f633bcca7916fd9c0f1d0394901438"
+      ]
+    },
+    {
+      "id": "CVE-2025-10256",
+      "status": "disabled",
+      "component": "af_firequalizer filter",
+      "assessment": "Filter excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2025-10256",
+      "primaryReferences": [
+        "https://git.ffmpeg.org/gitweb/ffmpeg.git/commitdiff/a25462482c02c004d685a8fcf2fa63955aaa0931",
+        "https://git.ffmpeg.org/gitweb/ffmpeg.git/commitdiff/0e8ccde9e5c9daa081eb4c037d83350390c9aa2b",
+        "https://git.ffmpeg.org/gitweb/ffmpeg.git/commitdiff/d3be186ed1bcdcf2c093d6b13a0e66dc5132be2a"
+      ]
+    },
+    {
+      "id": "CVE-2024-36615",
+      "status": "disabled",
+      "component": "vp9 decoder",
+      "assessment": "Video decoder and pthreads excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2024-36615",
+      "primaryReferences": [
+        "https://github.com/ffmpeg/ffmpeg/commit/0ba058579f332b3060d8470a04ddd3fbf305be61",
+        "https://github.com/FFmpeg/FFmpeg/commit/8c62d77139ca07390414fcfd26b2a4d506fed3b9"
+      ]
+    },
+    {
+      "id": "CVE-2024-35369",
+      "status": "disabled",
+      "component": "speex decoder",
+      "assessment": "Audio decoder not in allowlist",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2024-35369",
+      "primaryReferences": [
+        "https://github.com/ffmpeg/ffmpeg/commit/0895ef0d6d6406ee6cd158fc4d47d80f201b8e9c"
+      ]
+    },
+    {
+      "id": "CVE-2024-31578",
+      "status": "disabled",
+      "component": "hardware frame context",
+      "assessment": "Hardware acceleration excluded; application does not create hardware frames",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2024-31578",
+      "primaryReferences": [
+        "https://github.com/ffmpeg/ffmpeg/commit/3bb00c0a420c3ce83c6fafee30270d69622ccad7"
+      ]
+    },
+    {
+      "id": "CVE-2023-49528",
+      "status": "disabled",
+      "component": "af_dialoguenhance filter",
+      "assessment": "Filter excluded",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2023-49528",
+      "primaryReferences": [
+        "https://trac.ffmpeg.org/ticket/10691",
+        "https://github.com/FFmpeg/FFmpeg/commit/f05c52985cf80d565c6e91fb4749e57dd8977d3e",
+        "https://github.com/ffmpeg/ffmpeg/commit/2d9ed64859c9887d0504cd71dbd5b2c15e14251a"
+      ]
+    },
+    {
+      "id": "CVE-2023-6601",
+      "status": "disabled",
+      "component": "HLS data URI path",
+      "assessment": "data protocol excluded; generated local playlists use file protocol only",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2023-6601",
+      "primaryReferences": [
+        "https://bugzilla.redhat.com/show_bug.cgi?id=2253172",
+        "https://github.com/FFmpeg/FFmpeg/commit/d09f50c0f5f045dec35f0ca22c2212fae2378dba"
+      ]
+    },
+    {
+      "id": "CVE-2026-107660",
+      "status": "disabled",
+      "component": "tls_mbedtls.c",
+      "assessment": "TLS backend and native networking excluded; browser handles HTTP(S)",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-107660",
+      "primaryReferences": [
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/pulls/24383",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/57a2e704b4a6eda5d061b45aacde6b19c026bfc0",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/d377212904a19fc740d721cbda0ba58fa3805a29",
+        "https://code.ffmpeg.org/FFmpeg/FFmpeg/commit/0cd2a70eacd510c2efed48b9fc177c7cb2bc549f"
+      ]
+    },
+    {
+      "id": "CVE-2026-30999",
+      "status": "fixed-base",
+      "component": "tools/zmqsend.c",
+      "assessment": "Upstream fix is a zmqsend memory leak, not the advertised bprint heap overflow; tool not shipped; backport 946bf8977e64c38811c7deaf69d9d09b3168971f in 5.1.10",
+      "tracker": "https://security-tracker.debian.org/tracker/CVE-2026-30999",
+      "primaryReferences": [
+        "https://github.com/ffmpeg/fFmpeg/commit/144af8f81abc1385631b4e1f4672cd415a9c6e05"
+      ]
+    }
+  ]
+}
