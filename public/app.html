@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Video Grabber</title>
+    <link rel="stylesheet" href="app.css">
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="5" width="26" height="22" rx="4" fill="currentColor"/><path d="m13 11 9 5-9 5z" fill="white"/><path d="M6 9h2m-2 7h2m-2 7h2m16-14h2m-2 7h2m-2 7h2" stroke="white" stroke-width="2"/></svg>
+        <span>Video Grabber</span>
+      </div>
+      <span class="topbar-description">재생 중인 영상을 파일로</span>
+    </header>
+
+    <main>
+      <section class="source-strip" aria-labelledby="page-title">
+        <div class="source-page">
+          <span id="page-host" class="page-host">연결된 페이지</span>
+          <h1 id="page-title">재생 페이지를 확인하고 있습니다</h1>
+          <p id="source-guidance">영상을 재생하면 다운로드할 수 있는 미디어가 여기에 표시됩니다.</p>
+        </div>
+        <button id="open-source" class="button button-quiet" type="button">재생 페이지 보기</button>
+      </section>
+
+      <div id="global-error" class="notice notice-error" role="alert" hidden></div>
+
+      <section class="capture-bar" aria-label="트래픽 수집">
+        <div class="capture-summary">
+          <div class="capture-state"><span id="capture-indicator" class="capture-indicator" aria-hidden="true"></span><strong id="capture-status">자동 감지 중</strong></div>
+          <p id="capture-description">이후 재생되는 미디어 데이터를 보관합니다. 수집 중에는 Chrome에 디버깅 알림이 표시됩니다.</p>
+        </div>
+        <div class="capture-numbers" aria-label="수집량"><strong id="capture-bytes">0 B</strong><span id="capture-count">응답 0개</span></div>
+        <button id="capture-toggle" class="button button-secondary" type="button">응답 수집 시작</button>
+      </section>
+      <p id="capture-error" class="capture-error" role="status" hidden></p>
+
+      <div class="workspace">
+        <section class="sources-pane" aria-labelledby="sources-heading">
+          <div class="section-heading">
+            <h2 id="sources-heading">감지한 미디어 <span id="source-count" class="count">0</span></h2>
+            <button id="refresh" class="text-button" type="button">새로 확인</button>
+          </div>
+          <div id="empty-sources" class="empty-state">
+            <svg viewBox="0 0 72 52" aria-hidden="true"><rect x="2" y="2" width="68" height="48" rx="6"/><path d="m30 17 15 9-15 9z"/><path d="M9 10h4M9 26h4M9 42h4M59 10h4M59 26h4M59 42h4"/></svg>
+            <h3>영상 재생을 시작해 주세요</h3>
+            <p>재생 페이지에서 영상을 시작하거나 새로고침하면 미디어 주소를 감지합니다.</p>
+          </div>
+          <ul id="resource-list" class="resource-list" aria-label="다운로드할 미디어"></ul>
+          <div class="source-footer"><span id="traffic-count">미디어 요청 0회</span><button id="clear" class="text-button" type="button">수집 내용 지우기</button></div>
+        </section>
+
+        <section class="download-pane" aria-labelledby="download-heading">
+          <div class="section-heading"><h2 id="download-heading">파일로 저장</h2><span id="selected-kind" class="kind-badge" hidden></span></div>
+          <p id="selection-empty" class="muted">왼쪽 목록에서 저장할 미디어를 선택해 주세요.</p>
+          <div id="selection-detail" hidden>
+            <p id="selected-name" class="selected-name"></p>
+            <p id="selected-url" class="selected-url"></p>
+            <div id="inspect-status" class="inline-status" role="status"></div>
+            <div id="inspect-error" class="notice notice-error" role="alert" hidden></div>
+            <div id="inspect-note" class="notice notice-info" hidden></div>
+            <div class="field"><label for="file-title">파일 이름</label><input id="file-title" type="text" maxlength="160" autocomplete="off" placeholder="영상 제목"></div>
+            <div class="track-fields">
+              <div class="field"><label for="video-quality">영상 화질</label><select id="video-quality" disabled><option>확인 중</option></select></div>
+              <div class="field"><label for="audio-track">오디오</label><select id="audio-track" disabled><option>확인 중</option></select></div>
+            </div>
+            <div class="download-actions"><button id="download-video" class="button button-primary" type="button" disabled>영상 + 오디오 저장</button><button id="download-audio" class="button button-secondary" type="button" disabled>오디오만 저장</button></div>
+            <p class="save-hint">병합과 변환은 이 기기에서 처리됩니다. 저장이 끝날 때까지 이 탭을 열어 두세요.</p>
+          </div>
+          <section id="job" class="job" aria-label="저장 진행 상황" hidden>
+            <div class="job-title"><strong id="job-heading">저장 준비 중</strong><button id="cancel-job" class="text-button" type="button">취소</button></div>
+            <progress id="job-progress" max="1" aria-label="저장 진행률"></progress>
+            <p id="job-message" role="status" aria-live="polite"></p>
+          </section>
+        </section>
+      </div>
+
+      <section id="history-section" class="history-section" aria-labelledby="history-heading" hidden>
+        <h2 id="history-heading">이 탭의 저장 내역</h2><ul id="history-list" class="history-list"></ul>
+      </section>
+      <details class="traffic-details"><summary>미디어 조각 트래픽 <span id="segment-count">0개</span></summary><p class="muted">조각 파일은 재생 목록의 순서대로 재조립됩니다. 개별 조각 대신 위의 HLS 또는 DASH 미디어를 선택하세요.</p><ul id="segment-list" class="segment-list"></ul></details>
+      <footer class="page-footer"><span>수집 데이터는 이 기기에만 보관됩니다.</span><a href="uninstall.html">확장 프로그램 제거</a></footer>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "verifiedOn": "2026-11-10",
+  "platform": "macOS arm64",
+  "toolchain": "Emscripten 3.1.40",
+  "method": "Extract corresponding-source archive into a different directory, run its scripts/build-ffmpeg-core.sh with a fresh SDK installation, compare output SHA-256 and config_components.h",
+  "byteIdentical": true,
+  "configurationIdentical": true,
+  "sha256": {
+    "ffmpeg-core.js": "9e27f561bb2db1122224ab0e43f04d2625e34e8a122f82e68f37100c4cad5d07",
+    "ffmpeg-core.wasm": "44d01528fa6d97f22456f5255996a967e2fddea973bc1b735a37b04068aea492"
+  },
+  "scope": "Same host platform and pinned toolchain, different build paths; cross-platform bit identity is not claimed."
+}

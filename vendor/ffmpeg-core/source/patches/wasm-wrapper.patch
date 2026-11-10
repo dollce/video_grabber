@@ -1,0 +1,344 @@
+--- a/fftools/cmdutils.c
++++ b/fftools/cmdutils.c
+@@ -24,6 +24,7 @@
+ #include <stdlib.h>
+ #include <errno.h>
+ #include <math.h>
++#include <emscripten.h>
+ 
+ /* Include only the enabled headers since some compilers (namely, Sun
+    Studio) will not omit unused inline functions and create undefined
+@@ -95,7 +96,23 @@
+     if (program_exit)
+         program_exit(ret);
+ 
+-    exit(ret);
++    /*
++     * abort() is used instead of exit() because exit() not only
++     * terminates ffmpeg but also the whole node.js program, which 
++     * is not ideal.
++     *
++     * abort() terminiates the ffmpeg with an JS exception
++     *
++     *   RuntimeError: Aborted...
++     *
++     * This excpetion is catch and not visible to users.
++     *
++     */
++    EM_ASM({
++        Module.ret = $0;
++    }, ret);
++    abort();
++    // exit(ret);
+ }
+ 
+ double parse_number_or_die(const char *context, const char *numstr, int type,
+--- a/fftools/ffmpeg.c
++++ b/fftools/ffmpeg.c
+@@ -32,6 +32,7 @@
+ #include <limits.h>
+ #include <stdatomic.h>
+ #include <stdint.h>
++#include <emscripten.h>
+ 
+ #if HAVE_IO_H
+ #include <io.h>
+@@ -1503,6 +1504,10 @@
+         }
+     }
+ }
++
++EM_JS(void, send_progress, (double progress, double time), {
++    Module.receiveProgress(progress, time);
++});
+ 
+ static void print_report(int is_last_report, int64_t timer_start, int64_t cur_time)
+ {
+@@ -1629,6 +1634,24 @@
+             nb_frames_drop += ost->last_dropped;
+     }
+ 
++    /* send_progress here only works when the duration of
++     * input and output file are the same, other cases (ex. trim)
++     * still WIP.
++     *
++     * TODO: support cases like trim.
++     */
++    int64_t duration = -1;
++    int64_t pts_abs = FFABS(pts);
++    /* Use the longest duration among all input files.
++     */
++    for (int i = 0; i < nb_input_files; i++) {
++      int64_t file_duration = input_files[i]->ctx->duration;
++      if (file_duration > duration) {
++        duration = file_duration;
++      }
++    }
++    send_progress((double)pts_abs / (double)duration, (double)pts_abs);
++
+     secs = FFABS(pts) / AV_TIME_BASE;
+     us = FFABS(pts) % AV_TIME_BASE;
+     mins = secs / 60;
+@@ -1684,7 +1707,8 @@
+     }
+ 
+     if (print_stats || is_last_report) {
+-        const char end = is_last_report ? '\n' : '\r';
++        // Always print a new line of message.
++        const char end = '\n'; //is_last_report ? '\n' : '\r';
+         if (print_stats==1 && AV_LOG_INFO > av_log_get_level()) {
+             fprintf(stderr, "%s    %c", buf.str, end);
+         } else
+@@ -1710,8 +1734,11 @@
+ 
+     first_report = 0;
+ 
+-    if (is_last_report)
+-        print_final_stats(total_size);
++    if (is_last_report) {
++      // Make sure the progress is ended with 1.
++      if (pts_abs != duration) send_progress(1, (double)pts_abs);
++      print_final_stats(total_size);
++    }
+ }
+ 
+ static int ifilter_parameters_from_codecpar(InputFilter *ifilter, AVCodecParameters *par)
+@@ -4321,6 +4348,16 @@
+     return reap_filters(0);
+ }
+ 
++/* is_timeout checks if transcode() is running longer
++ * than a timeout value, return 1 when timeout.
++ */
++EM_JS(int, is_timeout, (int64_t diff), {
++    if (Module.timeout === -1) return 0;
++    else {
++      return Module.timeout <= diff;
++    }
++});
++
+ /*
+  * The following code is the main loop of the file converter
+  */
+@@ -4350,6 +4387,8 @@
+ 
+     while (!received_sigterm) {
+         int64_t cur_time= av_gettime_relative();
++
++        if (is_timeout((cur_time - timer_start) / 1000) == 1) exit_program(1);
+ 
+         /* if 'q' pressed, exits */
+         if (stdin_interaction)
+@@ -4513,8 +4552,55 @@
+ #endif
+ }
+ 
+-int main(int argc, char **argv)
+-{
++/* init_globals initializes global variables to enable multiple
++ * calls of ffmpeg().
++ *
++ * This is not required in the original command line version as
++ * the global varialbes are always re-initialized when calling
++ * main() function.
++ */
++void init_globals() {
++  nb_frames_dup = 0;
++  dup_warning = 1000;
++  nb_frames_drop = 0;
++  nb_output_dumped = 0;
++  want_sdp = 1;
++
++  progress_avio = NULL;
++
++  input_streams = NULL;
++  nb_input_streams = 0;
++  input_files = NULL;
++  nb_input_files = 0;
++
++  output_streams = NULL;
++  nb_output_streams = 0;
++  output_files = NULL;
++  nb_output_files = 0;
++
++  filtergraphs = NULL;
++  nb_filtergraphs = 0;
++
++  received_sigterm = 0;
++  received_nb_signals = 0;
++  transcode_init_done = ATOMIC_VAR_INIT(0);
++  ffmpeg_exited = 0;
++  main_return_code = 0;
++  copy_ts_first_pts = AV_NOPTS_VALUE;
++}
++
++/* ffmpeg() is simply a rename of main(), but it makes things easier to
++ * control as main() is a special function name that might trigger
++ * some hidden mechanisms.
++ *
++ * One example is that when using multi-threading, a proxy_main() function
++ * might be used instead of main().
++ */
++int ffmpeg(int argc, char **argv)
++// int main(int argc, char **argv)
++{
++    init_globals();
++
+     int i, ret;
+     BenchmarkTimeStamps ti;
+ 
+--- a/fftools/ffmpeg_opt.c
++++ b/fftools/ffmpeg_opt.c
+@@ -898,11 +898,8 @@
+         MATCH_PER_STREAM_OPT(codec_tags, str, codec_tag, ic, st);
+         if (codec_tag) {
+             uint32_t tag = strtol(codec_tag, &next, 0);
+-            if (*next) {
+-                uint8_t buf[4] = { 0 };
+-                memcpy(buf, codec_tag, FFMIN(sizeof(buf), strlen(codec_tag)));
+-                tag = AV_RL32(buf);
+-            }
++            if (*next)
++                tag = AV_RL32(codec_tag);
+             st->codecpar->codec_tag = tag;
+         }
+ 
+@@ -1663,11 +1660,8 @@
+     MATCH_PER_STREAM_OPT(codec_tags, str, codec_tag, oc, st);
+     if (codec_tag) {
+         uint32_t tag = strtol(codec_tag, &next, 0);
+-        if (*next) {
+-            uint8_t buf[4] = { 0 };
+-            memcpy(buf, codec_tag, FFMIN(sizeof(buf), strlen(codec_tag)));
+-            tag = AV_RL32(buf);
+-        }
++        if (*next)
++            tag = AV_RL32(codec_tag);
+         ost->st->codecpar->codec_tag =
+         ost->enc_ctx->codec_tag = tag;
+     }
+--- a/fftools/ffprobe.c
++++ b/fftools/ffprobe.c
+@@ -90,8 +90,8 @@
+     int       nb_streams;
+ } InputFile;
+ 
+-const char program_name[] = "ffprobe";
+-const int program_birth_year = 2007;
++const char program_name_ffprobe[] = "ffprobe";
++const int program_birth_year_ffprobe = 2007;
+ 
+ static int do_bitexact = 0;
+ static int do_count_frames = 0;
+@@ -382,6 +382,58 @@
+ #if HAVE_THREADS
+     pthread_mutex_destroy(&log_mutex);
+ #endif
++
++    do_bitexact = 0;
++    do_count_frames = 0;
++    do_count_packets = 0;
++    do_read_frames  = 0;
++    do_read_packets = 0;
++    do_show_chapters = 0;
++    do_show_error   = 0;
++    do_show_format  = 0;
++    do_show_frames  = 0;
++    do_show_packets = 0;
++    do_show_programs = 0;
++    do_show_streams = 0;
++    do_show_stream_disposition = 0;
++    do_show_data    = 0;
++    do_show_program_version  = 0;
++    do_show_library_versions = 0;
++    do_show_pixel_formats = 0;
++    do_show_pixel_format_flags = 0;
++    do_show_pixel_format_components = 0;
++    do_show_log = 0;
++    do_show_chapter_tags = 0;
++    do_show_format_tags = 0;
++    do_show_frame_tags = 0;
++    do_show_program_tags = 0;
++    do_show_stream_tags = 0;
++    do_show_packet_tags = 0;
++    show_value_unit              = 0;
++    use_value_prefix             = 0;
++    use_byte_value_binary_prefix = 0;
++    use_value_sexagesimal_format = 0;
++    show_private_data            = 1;
++    show_optional_fields = SHOW_OPTIONAL_FIELDS_AUTO;
++    print_format = NULL;
++    stream_specifier = NULL;
++    show_data_hash = NULL;
++    read_intervals = NULL;
++    read_intervals_nb = 0;
++    find_stream_info  = 1;
++    input_filename = NULL;
++    print_input_filename = NULL;
++    iformat = NULL;
++    output_filename = NULL;
++    hash = NULL;
++    nb_streams = 0;
++    nb_streams_packets = NULL;
++    nb_streams_frames = NULL;
++    selected_streams = NULL;
++    log_buffer = NULL;
++    log_buffer_size = 0;
++
++    av_log(NULL, AV_LOG_DEBUG, "FFprobe: Cleanup done.\n");
+ }
+ 
+ struct unit_value {
+@@ -3491,7 +3543,7 @@
+ static void show_usage(void)
+ {
+     av_log(NULL, AV_LOG_INFO, "Simple multimedia streams analyzer\n");
+-    av_log(NULL, AV_LOG_INFO, "usage: %s [OPTIONS] INPUT_FILE\n", program_name);
++    av_log(NULL, AV_LOG_INFO, "usage: %s [OPTIONS] INPUT_FILE\n", program_name_ffprobe);
+     av_log(NULL, AV_LOG_INFO, "\n");
+ }
+ 
+@@ -3503,7 +3555,7 @@
+     writer_print_section_header(w, SECTION_ID_PROGRAM_VERSION);
+     print_str("version", FFMPEG_VERSION);
+     print_fmt("copyright", "Copyright (c) %d-%d the FFmpeg developers",
+-              program_birth_year, CONFIG_THIS_YEAR);
++              program_birth_year_ffprobe, CONFIG_THIS_YEAR);
+     print_str("compiler_ident", CC_IDENT);
+     print_str("configuration", FFMPEG_CONFIGURATION);
+     writer_print_section_footer(w);
+@@ -3740,7 +3792,7 @@
+     return 0;
+ }
+ 
+-void show_help_default(const char *opt, const char *arg)
++void show_help_default_ffprobe(const char *opt, const char *arg)
+ {
+     av_log_set_callback(log_callback_help);
+     show_usage();
+@@ -4020,7 +4072,7 @@
+             do_show_##varname = 1;                                      \
+     } while (0)
+ 
+-int main(int argc, char **argv)
++int ffprobe(int argc, char **argv)
+ {
+     const Writer *w;
+     WriterContext *wctx;
+@@ -4037,6 +4089,7 @@
+     }
+ #endif
+     av_log_set_flags(AV_LOG_SKIP_REPEATED);
++    ffprobe_cleanup(0);
+     register_exit(ffprobe_cleanup);
+ 
+     options = real_options;
+@@ -4142,7 +4195,7 @@
+              (!do_show_program_version && !do_show_library_versions && !do_show_pixel_formats))) {
+             show_usage();
+             av_log(NULL, AV_LOG_ERROR, "You have to specify one input file.\n");
+-            av_log(NULL, AV_LOG_ERROR, "Use -h to get full help or, even better, run 'man %s'.\n", program_name);
++            av_log(NULL, AV_LOG_ERROR, "Use -h to get full help or, even better, run 'man %s'.\n", program_name_ffprobe);
+             ret = AVERROR(EINVAL);
+         } else if (input_filename) {
+             ret = probe_file(wctx, input_filename, print_input_filename);

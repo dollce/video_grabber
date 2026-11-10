@@ -1,0 +1,6 @@
+node_modules/
+dist/
+artifacts/
+fixtures/media/
+.DS_Store
+.video-grabber-build-root

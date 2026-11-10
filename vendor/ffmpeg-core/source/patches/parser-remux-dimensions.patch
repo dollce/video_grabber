@@ -1,0 +1,61 @@
+--- a/libavcodec/parser.c
++++ b/libavcodec/parser.c
+@@ -26,6 +26,8 @@
+ 
+ #include "libavutil/avassert.h"
+ #include "libavutil/mem.h"
++#include "libavutil/imgutils.h"
++#include "libavutil/pixdesc.h"
+ 
+ #include "parser.h"
+ 
+@@ -166,6 +168,22 @@
+ #define FILL(name) if(s->name > 0 && avctx->name <= 0) avctx->name = s->name
+     if (avctx->codec_type == AVMEDIA_TYPE_VIDEO) {
+         FILL(field_order);
++        /* This remux-only build has no H.264/HEVC decoder. Promote the
++         * dimensions already parsed from SPS headers so MPEG-TS probing can
++         * populate codecpar without decoding a video frame. Never overwrite
++         * container-provided dimensions and validate before accepting them. */
++        if ((avctx->codec_id == AV_CODEC_ID_H264 ||
++             avctx->codec_id == AV_CODEC_ID_HEVC) &&
++            !avcodec_find_decoder(avctx->codec_id) &&
++            s->width > 0 && s->height > 0 &&
++            av_image_check_size(s->width, s->height, 0, avctx) >= 0) {
++            FILL(width);
++            FILL(height);
++            FILL(coded_width);
++            FILL(coded_height);
++            if (avctx->pix_fmt == AV_PIX_FMT_NONE && av_pix_fmt_desc_get(s->format))
++                avctx->pix_fmt = s->format;
++        }
+     }
+ 
+     /* update the file pointer */
+--- a/libavformat/hls.c
++++ b/libavformat/hls.c
+@@ -2508,6 +2508,24 @@
+             ret = set_stream_info_from_input_stream(st, pls, ist);
+             if (ret < 0) {
+                 return ret;
++            }
++        }
++
++        /* Sub-demuxer parsers can discover SPS dimensions without a video
++         * decoder. HLS normally copies codecpar before that discovery and
++         * refreshes it only on codec-id changes. Forward the missing fields
++         * for this remux-only build, then refresh the parent codec context. */
++        if (!st->codecpar->width &&
++            (st->codecpar->codec_id == AV_CODEC_ID_H264 ||
++             st->codecpar->codec_id == AV_CODEC_ID_HEVC) &&
++            !avcodec_find_decoder(st->codecpar->codec_id)) {
++            AVCodecContext *subctx = ffstream(ist)->avctx;
++            if (subctx->codec_id == st->codecpar->codec_id &&
++                subctx->width > 0 && subctx->height > 0) {
++                st->codecpar->width = subctx->width;
++                st->codecpar->height = subctx->height;
++                st->codecpar->format = subctx->pix_fmt;
++                ffstream(st)->need_context_update = 1;
+             }
+         }
+ 

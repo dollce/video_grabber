@@ -1,0 +1,12 @@
+--- a/libavformat/hevc.c
++++ b/libavformat/hevc.c
+@@ -683,6 +683,9 @@
+ 
+     array    = &hvcc->array[index];
+     numNalus = array->numNalus;
++
++    if (numNalus >= UINT16_MAX)
++        return AVERROR_INVALIDDATA;
+ 
+     ret = av_reallocp_array(&array->nalUnit, numNalus + 1, sizeof(uint8_t*));
+     if (ret < 0)

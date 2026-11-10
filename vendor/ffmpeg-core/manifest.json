@@ -1,0 +1,50 @@
+{
+  "name": "video-grabber-ffmpeg-core",
+  "version": "5.1.10-vg1",
+  "ffmpegVersion": "5.1.10",
+  "emscriptenVersion": "3.1.40",
+  "license": "LGPL-2.1-or-later",
+  "sha256": {
+    "ffmpeg-core.js": "9e27f561bb2db1122224ab0e43f04d2625e34e8a122f82e68f37100c4cad5d07",
+    "ffmpeg-core.wasm": "44d01528fa6d97f22456f5255996a967e2fddea973bc1b735a37b04068aea492"
+  },
+  "sources": {
+    "ffmpeg": {
+      "commit": "19feb712f5c1821d8a3fa1ad63c5bd2e3b9672eb",
+      "url": "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/19feb712f5c1821d8a3fa1ad63c5bd2e3b9672eb",
+      "sha256": "bbb08946e1a4dcba2f0962c7bb79bc3fc900dbc3251c044aab9bbf81b93c47a1"
+    },
+    "wrapper": {
+      "commit": "f876f907c7e9b9bf51d4ed0b913a855a63ae63fc",
+      "url": "https://codeload.github.com/ffmpegwasm/ffmpeg.wasm/tar.gz/f876f907c7e9b9bf51d4ed0b913a855a63ae63fc",
+      "sha256": "5191762afdd8fdbec457fd2650cc773fcebcfe1d5bcb7e5ee9584e1a78bd3d5b"
+    },
+    "emsdk": {
+      "commit": "ae245715ef50e036b68a2412a323129676bf8300",
+      "url": "https://codeload.github.com/emscripten-core/emsdk/tar.gz/ae245715ef50e036b68a2412a323129676bf8300",
+      "sha256": "74ca62e60359fb946e297001913a1f10dbd77271ab86671f5e5c2bd1f5b89b3a"
+    }
+  },
+  "patches": {
+    "CVE-2026-107678.patch": "593ef8b43ff39373362b1d95d21c63993e9ace9ad1483f876fc204bc9f9ed1dd",
+    "CVE-2026-107695.patch": "d1b4ade56c227892267a6d9a1206c4cb129142ef4b7ec435e88c21ed625218c3",
+    "CVE-2026-107697.patch": "c95ca76688ea1635afbeac83b186f84b1b58e6e7b3971a84caf7c225fb78910a",
+    "disable-pssh.patch": "2f3c733a58ca25f586e1e4ac2d0465d72922aadd9a46b5709a08b60668b40650",
+    "hevc-count-bound.patch": "649bd945f4965e8d016bc91eb9629f5ac46722328bd2567241bd92843247d852",
+    "parser-remux-dimensions.patch": "88c8abb84d4b1ea376c5115ed484b00b428553a94d0f9c0f6c36d0cdf5f6e537",
+    "wasm-wrapper.patch": "7fe790ff800ad28b90e6283d2fecd840cf34769edad4251fa8e643488f8c1959"
+  },
+  "build": {
+    "script": "scripts/build-ffmpeg-core.sh",
+    "singleThreaded": true,
+    "videoDecoders": false,
+    "nativeNetworking": false,
+    "externalCodecLibraries": false,
+    "protocols": [
+      "file"
+    ],
+    "audioEncoder": "aac",
+    "configurationSha256": "bf252571e5761705691b5914e7cfea676264971ec3ae5af73465912803166609"
+  },
+  "securityNote": "Scoped advisory review and reduced attack surface; no guarantee that unknown vulnerabilities are absent."
+}
