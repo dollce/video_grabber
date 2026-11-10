@@ -32,15 +32,20 @@ export async function generateFixtures() {
 
 export async function startFixtureServer(port = 0) {
   const blocked = new Set();
+  const replay = { blocked: false };
   const requests = [];
   const redirects = new Map([
     ['/redirect-hls/video.m3u8', '/relocated-hls/video/video.m3u8'],
     ['/redirect-hls/audio.m3u8', '/relocated-hls/audio/audio.m3u8'],
+    ['/relocated-hls/video/video-000.ts', '/delivered-hls/video/video-000.ts'],
+    ['/relocated-hls/audio/audio-000.ts', '/delivered-hls/audio/audio-000.ts'],
   ]);
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, 'http://localhost');
-    requests.push({ path: url.pathname, range: request.headers.range });
-    if (blocked.has(url.pathname)) { response.writeHead(403); response.end('Replay disabled by test'); return; }
+    const observed = { path: url.pathname, range: request.headers.range };
+    requests.push(observed);
+    response.once('finish', () => { observed.status = response.statusCode; });
+    if (replay.blocked || blocked.has(url.pathname)) { response.writeHead(403); response.end('Replay disabled by test'); return; }
     if (redirects.has(url.pathname)) {
       response.writeHead(302, { Location: redirects.get(url.pathname), 'Cache-Control': 'no-store' });
       response.end(); return;
@@ -56,7 +61,7 @@ export async function startFixtureServer(port = 0) {
       else if (url.pathname === '/player.js') path = resolve(root, 'fixtures/player.js');
       else if (url.pathname === '/hls.js') path = resolve(root, 'node_modules/hls.js/dist/hls.js');
       else {
-        const relocated = /^\/(?:relocated-hls\/(?:video|audio)|redirect-dash|relocated-dash)\/([^/]+)$/.exec(url.pathname);
+        const relocated = /^\/(?:(?:relocated-hls|delivered-hls)\/(?:video|audio)|redirect-dash|relocated-dash)\/([^/]+)$/.exec(url.pathname);
         const mediaPath = url.pathname === '/redirect-hls/master.m3u8' ? '/master.m3u8' : relocated ? `/${relocated[1]}` : url.pathname;
         path = resolve(mediaDir, '.' + decodeURIComponent(mediaPath));
         if (!path.startsWith(mediaDir + sep)) throw new Error('Invalid path');
@@ -77,7 +82,7 @@ export async function startFixtureServer(port = 0) {
     } catch { response.writeHead(404); response.end('Not found'); }
   });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
-  return { server, url: `http://127.0.0.1:${server.address().port}`, blocked, requests, redirects };
+  return { server, url: `http://127.0.0.1:${server.address().port}`, blocked, requests, redirects, replay };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

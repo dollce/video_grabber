@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { BackgroundReply } from '../src/shared/types';
+import type { BackgroundReply, CapturedResponse } from '../src/shared/types';
 
 function event() {
   const listeners: ((...args: any[]) => any)[] = [];
@@ -12,13 +12,48 @@ const commands: { target: unknown; method: string }[] = [];
 const attaches: unknown[] = [];
 const created: unknown[] = [];
 const storage: Record<string, unknown> = {};
+const captured: CapturedResponse[] = [];
+const db = { transaction() {
+  const transaction = {
+    oncomplete: () => {},
+    objectStore: () => ({
+      put(record: CapturedResponse) { captured.push(record); queueMicrotask(() => transaction.oncomplete()); },
+      clear() { captured.length = 0; queueMicrotask(() => transaction.oncomplete()); },
+      index: () => ({ openCursor(tabId: number) {
+        const rows = captured.filter(record => record.tabId === tabId);
+        let offset = 0;
+        const request: { result: unknown; onsuccess: () => void } = { result: null, onsuccess: () => {} };
+        const advance = () => {
+          const record = rows[offset++];
+          request.result = record ? { delete: () => captured.splice(captured.indexOf(record), 1), continue: () => queueMicrotask(advance) } : null;
+          request.onsuccess();
+          if (!record) transaction.oncomplete();
+        };
+        queueMicrotask(advance);
+        return request;
+      } }),
+    }),
+  };
+  return transaction;
+} };
+Object.assign(globalThis, {
+  indexedDB: { open() {
+    const request = { result: db, onsuccess: () => {} };
+    queueMicrotask(() => request.onsuccess());
+    return request;
+  } },
+  IDBKeyRange: { only: (key: unknown) => key },
+});
 const fakeChrome = {
   runtime: { id: 'test-extension', getURL: (path: string) => `chrome-extension://test-extension/${path}`, onMessage, onStartup },
   storage: { session: { get: async () => ({ ...storage }), set: async (value: Record<string, unknown>) => Object.assign(storage, value), remove: async (key: string) => { delete storage[key]; } } },
   action: { onClicked, setBadgeText: async () => {}, setBadgeBackgroundColor: async () => {} },
   tabs: { onRemoved, get: async (id: number) => ({ id, title: 'Fixture player', url: 'https://example.test/watch' }), create: async (value: unknown) => { created.push(value); } },
   webRequest: { onBeforeRequest, onHeadersReceived },
-  debugger: { onEvent: onDebuggerEvent, onDetach, attach: async (target: unknown) => { attaches.push(target); }, detach: async () => {}, sendCommand: async (target: unknown, method: string) => { commands.push({ target, method }); } },
+  debugger: { onEvent: onDebuggerEvent, onDetach, attach: async (target: unknown) => { attaches.push(target); }, detach: async () => {}, sendCommand: async (target: unknown, method: string) => {
+    commands.push({ target, method });
+    if (method === 'Network.getResponseBody') return { body: 'captured bytes', base64Encoded: false };
+  } },
 };
 Object.assign(globalThis, { chrome: fakeChrome });
 await import('../src/background');
@@ -78,4 +113,81 @@ test('action opens a separate extension page bound to the clicked tab', () => {
 test('only the extension removal page can clear all captured data', async () => {
   await assert.rejects(request({ type: 'uninstall-cleanup' }), /rejected/);
   await assert.rejects(request({ type: 'uninstall-cleanup' }, { id: 'test-extension', url: 'https://example.test/uninstall.html' }), /rejected/);
+});
+
+const emit = async (source: { tabId: number; sessionId?: string }, method: string, params: unknown) => {
+  onDebuggerEvent.listeners[0](source, method, params);
+  await tick();
+};
+async function redirect(source: { tabId: number; sessionId?: string }, requestId: string, from: string, to: string) {
+  await emit(source, 'Network.requestWillBeSent', { requestId, redirectResponse: { url: from, status: 302 }, request: { url: to } });
+}
+async function finish(source: { tabId: number; sessionId?: string }, requestId: string, url: string) {
+  await emit(source, 'Network.responseReceived', { requestId, response: { url, mimeType: 'application/vnd.apple.mpegurl', status: 200 } });
+  await emit(source, 'Network.loadingFinished', { requestId, encodedDataLength: 14 });
+}
+
+test('capture retains a contiguous redirect chain with one body and one quota charge', async () => {
+  const source = { tabId: 101 };
+  await request({ type: 'capture-start', tabId: source.tabId });
+  await emit(source, 'Network.requestWillBeSent', { requestId: 'r', request: { url: 'https://origin.test/start.m3u8' } });
+  await redirect(source, 'r', 'https://origin.test/start.m3u8', 'https://edge.test/list.m3u8');
+  await redirect(source, 'r', 'https://edge.test/list.m3u8', 'https://cdn.test/session/list.m3u8');
+  await finish(source, 'r', 'https://cdn.test/session/list.m3u8');
+  const stopped = await request({ type: 'capture-stop', tabId: source.tabId });
+  const rows = captured.filter(record => record.tabId === source.tabId);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].url, 'https://cdn.test/session/list.m3u8');
+  assert.deepEqual(rows[0].aliases, ['https://origin.test/start.m3u8', 'https://edge.test/list.m3u8']);
+  assert.equal(stopped.ok && stopped.snapshot.capture.count, 1);
+  assert.equal(stopped.ok && stopped.snapshot.capture.bytes, rows[0].body.size);
+});
+
+test('redirect chains are isolated by tab and debugger child session', async () => {
+  const sources = [{ tabId: 102 }, { tabId: 102, sessionId: 'child' }, { tabId: 103 }];
+  for (const tabId of [102, 103]) await request({ type: 'capture-start', tabId });
+  for (const [index, source] of sources.entries()) await redirect(source, 'same-request', `https://origin.test/${index}.m3u8`, `https://cdn.test/${index}.m3u8`);
+  for (const [index, source] of sources.entries()) await finish(source, 'same-request', `https://cdn.test/${index}.m3u8`);
+  for (const [index, source] of sources.entries()) {
+    const row = captured.find(record => record.tabId === source.tabId && record.url === `https://cdn.test/${index}.m3u8`);
+    assert.deepEqual(row?.aliases, [`https://origin.test/${index}.m3u8`]);
+  }
+  for (const tabId of [102, 103]) await request({ type: 'capture-stop', tabId });
+});
+
+test('new requests and discontinuous redirect events cannot inherit old aliases', async () => {
+  const source = { tabId: 104 };
+  await request({ type: 'capture-start', tabId: source.tabId });
+  await redirect(source, 'reused', 'https://old.test/a', 'https://old.test/b');
+  await emit(source, 'Network.requestWillBeSent', { requestId: 'reused', request: { url: 'https://new.test/list.m3u8' } });
+  await finish(source, 'reused', 'https://new.test/list.m3u8');
+  await redirect(source, 'broken', 'https://old.test/a', 'https://old.test/b');
+  await redirect(source, 'broken', 'https://different.test/start', 'https://new.test/other.m3u8');
+  await finish(source, 'broken', 'https://new.test/other.m3u8');
+  assert.deepEqual(captured.find(record => record.url === 'https://new.test/list.m3u8')?.aliases, []);
+  assert.deepEqual(captured.find(record => record.url === 'https://new.test/other.m3u8')?.aliases, ['https://different.test/start']);
+  await request({ type: 'capture-stop', tabId: source.tabId });
+});
+
+test('failed, detached, stopped and navigation-cleared redirect state is not reused', async () => {
+  const source = { tabId: 105 }, child = { tabId: 105, sessionId: 'child' };
+  await request({ type: 'capture-start', tabId: source.tabId });
+  await redirect(source, 'failed', 'https://old.test/failure', 'https://new.test/failed.m3u8');
+  await emit(source, 'Network.loadingFailed', { requestId: 'failed' });
+  await finish(source, 'failed', 'https://new.test/failed.m3u8');
+  await redirect(child, 'detached', 'https://old.test/child', 'https://new.test/child.m3u8');
+  await emit(source, 'Target.detachedFromTarget', { sessionId: 'child' });
+  await finish(child, 'detached', 'https://new.test/child.m3u8');
+  for (const row of captured.filter(record => record.tabId === source.tabId)) assert.deepEqual(row.aliases, []);
+  await redirect(source, 'navigation', 'https://old.test/page', 'https://new.test/page.m3u8');
+  onBeforeRequest.listeners[0]({ tabId: source.tabId, type: 'main_frame', requestId: 'new-page', url: 'https://example.test/next' });
+  await tick();
+  await finish(source, 'navigation', 'https://new.test/page.m3u8');
+  assert.deepEqual(captured.find(record => record.url === 'https://new.test/page.m3u8')?.aliases, []);
+  await redirect(source, 'stopped', 'https://old.test/stopped', 'https://new.test/stopped.m3u8');
+  await request({ type: 'capture-stop', tabId: source.tabId });
+  await request({ type: 'capture-start', tabId: source.tabId });
+  await finish(source, 'stopped', 'https://new.test/stopped.m3u8');
+  assert.deepEqual(captured.find(record => record.url === 'https://new.test/stopped.m3u8')?.aliases, []);
+  await request({ type: 'capture-stop', tabId: source.tabId });
 });

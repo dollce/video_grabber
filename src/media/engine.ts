@@ -5,7 +5,8 @@ import { safeFilename } from './bytes';
 import { parseDash, parseHls, type DashRepresentation, type HlsMaster, type HlsMedia } from './manifests';
 
 type Notify = (progress: JobProgress) => void;
-const embedded = { id: 'embedded', label: '영상에 포함된 오디오' };
+const embedded = { id: 'embedded', label: '영상에 포함된 첫 번째 오디오' };
+const ambiguousInbandAudio = '선택한 HLS 오디오는 영상 안에 여러 트랙으로 함께 들어 있어 구분해 저장할 수 없습니다. 별도 오디오 트랙을 선택해 주세요.';
 const quality = (track: { height?: number; bandwidth: number }) =>
   [track.height ? `${track.height}p` : '원본', track.bandwidth ? `${Math.round(track.bandwidth / 1000)} kbps` : ''].filter(Boolean).join(' / ');
 const highest = <T extends { bandwidth: number }>(tracks: T[]): T[] => [...tracks].sort((a, b) => b.bandwidth - a.bandwidth);
@@ -30,15 +31,22 @@ export async function inspectMedia(resource: MediaResource, tabId: number, signa
       note: !manifest.endList ? '수집된 재생 목록과 현재 목록에 남아 있는 구간을 저장합니다. 수집 전 구간은 보장되지 않습니다.' : undefined };
     const variants = highest(manifest.variants);
     const defaultGroup = variants[0]?.audioGroup;
-    const audios = [...manifest.audios].sort((a, b) => Number(b.groupId === defaultGroup) - Number(a.groupId === defaultGroup) || Number(b.default) - Number(a.default));
+    const ambiguousGroups = ambiguousInbandGroups(manifest);
+    const audios = manifest.audios.filter(track => track.url || !ambiguousGroups.has(track.groupId))
+      .sort((a, b) => Number(b.groupId === defaultGroup) - Number(a.groupId === defaultGroup) || Number(b.default) - Number(a.default));
     let live = false;
     const media = await latestHls(fetcher, variants[0].url);
     if (media.type === 'media') live = !media.endList;
     const audioChoices = audios.map(track => ({ id: track.id, label: `${track.name}${track.language ? ` (${track.language})` : ''} / ${track.groupId}` }));
     if (variants.some(track => !track.audioGroup)) audioChoices.push(embedded);
+    const notes = [
+      live ? '수집된 구간과 현재 재생 목록을 저장합니다. 저장 중에는 이 창을 열어 두세요.' : undefined,
+      variants.some(track => track.audioGroup && ambiguousGroups.has(track.audioGroup))
+        ? '영상에 포함된 여러 오디오 중 하나를 구분해 저장하는 기능은 아직 지원하지 않습니다. 선택 가능한 별도 오디오가 있으면 사용할 수 있습니다.' : undefined,
+    ].filter(Boolean);
     return { videos: variants.map(track => ({ id: track.id, label: quality(track), audioIds: track.audioGroup ? audios.filter(audio => audio.groupId === track.audioGroup).map(audio => audio.id) : ['embedded'] })),
       audios: audioChoices, live,
-      note: live ? '수집된 구간과 현재 재생 목록을 저장합니다. 저장 중에는 이 창을 열어 두세요.' : undefined };
+      note: notes.length ? notes.join(' ') : undefined };
   }
   if (resource.kind === 'dash') {
     const manifest = await latestDash(fetcher, resource.url);
@@ -140,16 +148,38 @@ async function writeDash(ffmpeg: FFmpeg, fetcher: MediaFetcher, track: DashRepre
   return filename;
 }
 
+function ambiguousInbandGroups(master: HlsMaster): Set<string> {
+  const counts = new Map<string, number>();
+  for (const audio of master.audios) if (!audio.url) counts.set(audio.groupId, (counts.get(audio.groupId) ?? 0) + 1);
+  return new Set([...counts].filter(([, count]) => count > 1).map(([group]) => group));
+}
+
 function selectHlsAudio(master: HlsMaster, videoId?: string, audioId?: string) {
-  const video = master.variants.find(track => track.id === videoId) ?? highest(master.variants)[0];
+  const video = videoId ? master.variants.find(track => track.id === videoId) : highest(master.variants)[0];
+  if (!video) throw new Error('선택한 HLS 화질을 찾지 못했습니다. 재생 목록을 다시 선택해 주세요.');
   const choices = master.audios.filter(track => track.groupId === video.audioGroup);
-  const audio = audioId && audioId !== 'embedded' ? master.audios.find(track => track.id === audioId) : choices.find(track => track.default) ?? choices[0];
+  const ambiguousGroups = ambiguousInbandGroups(master);
+  const supported = choices.filter(track => track.url || !ambiguousGroups.has(track.groupId));
+  let audio: HlsMaster['audios'][number] | undefined;
+  if (audioId) {
+    if (audioId === 'embedded') {
+      if (video.audioGroup) throw new Error('선택한 화질의 오디오 트랙을 목록에서 선택해 주세요.');
+    } else {
+      audio = master.audios.find(track => track.id === audioId);
+      if (!audio) throw new Error('선택한 HLS 오디오 트랙을 찾지 못했습니다. 재생 목록을 다시 선택해 주세요.');
+    }
+  } else audio = supported.find(track => track.default) ?? supported[0];
   if (audio && audio.groupId !== video.audioGroup) throw new Error('선택한 화질과 오디오 그룹이 다릅니다. 해당 화질의 오디오 그룹을 선택해 주세요.');
+  // A master rendition's order or LANGUAGE does not identify its multiplexed
+  // stream index. Never silently turn a named in-band choice into first audio.
+  if ((audio && !audio.url && ambiguousGroups.has(audio.groupId)) || (!audio && video.audioGroup && ambiguousGroups.has(video.audioGroup))) {
+    throw new Error(ambiguousInbandAudio);
+  }
   if (video.audioGroup && !audio) throw new Error('선택한 화질의 오디오 트랙을 찾지 못했습니다.');
   return { video, audio };
 }
 
-async function prepareInputs(ffmpeg: FFmpeg, fetcher: MediaFetcher, request: DownloadRequest, notify: Notify): Promise<{ inputs: string[]; audioInput: number; duration?: number }> {
+export async function prepareInputs(ffmpeg: FFmpeg, fetcher: MediaFetcher, request: DownloadRequest, notify: Notify): Promise<{ inputs: string[]; audioInput: number; duration?: number }> {
   if (request.resource.kind === 'hls') {
     const manifest = await latestHls(fetcher, request.resource.url);
     let videoUrl = request.resource.url;

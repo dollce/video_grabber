@@ -31,6 +31,8 @@ export interface CapturedResponse {
   id: string;
   tabId: number;
   url: string;
+  /** Earlier HTTP(S) URLs in this response's observed redirect chain. */
+  aliases?: string[];
   mime: string;
   status: number;
   contentRange?: string;

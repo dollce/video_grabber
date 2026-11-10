@@ -8,9 +8,9 @@ import type { CapturedResponse } from '../src/shared/types';
 // A small read-only IDB harness exercises the real capture-store lookup. Each
 // fixture record retains the response URL recorded by the capture service.
 let captured: CapturedResponse[] = [];
-const db = { transaction: () => ({ objectStore: () => ({ index: () => ({
+const db = { transaction: () => ({ objectStore: () => ({ index: (index: string) => ({
   getAll([tabId, url]: [number, string]) {
-    const request = { result: captured.filter(record => record.tabId === tabId && record.url === url), onsuccess: () => {} };
+    const request = { result: captured.filter(record => record.tabId === tabId && (index === 'tabAlias' ? record.aliases?.includes(url) : record.url === url)), onsuccess: () => {} };
     queueMicrotask(() => request.onsuccess());
     return request;
   },
@@ -127,5 +127,28 @@ test('redirected media file responses still enforce ranges and account the retur
   assert.equal(fetcher.bytes, 3);
   mock.mock.mockImplementation(async () => response('cd', 'https://cdn.example/file.mp4', { status: 206, headers: { 'Content-Range': 'bytes 2-3/6' } }));
   await assert.rejects(fetcher.file({ url: 'https://origin.example/file.mp4', range: { offset: 2, length: 3 } }), /다른 데이터/);
+  assert.equal(fetcher.bytes, 3);
+});
+
+test('captured redirect aliases replay a playlist using its final response base after network denial', async t => {
+  const origin = 'https://origin.example/list.m3u8', final = 'https://cdn.example/session/list.m3u8';
+  captured = [{ ...capture(media, final), aliases: [origin] }];
+  t.mock.method(globalThis, 'fetch', async () => response('Denied', origin, { status: 403 }));
+  const snapshots = await new MediaFetcher(7).manifests(origin);
+  assert.deepEqual(snapshots, [{ text: media, url: final }]);
+  const [playlist] = parseManifestSnapshots(snapshots, parseHls);
+  assert.equal(playlist.type === 'media' && playlist.segments[0].url, 'https://cdn.example/session/chunk.m4s');
+});
+
+test('captured file aliases preserve ranges and tab isolation without network replay', async t => {
+  const origin = 'https://origin.example/chunk.m4s';
+  captured = [
+    { ...capture('wrong tab', 'https://other.example/file'), id: 'other-tab', tabId: 8, aliases: [origin] },
+    { ...capture('cde', 'https://cdn.example/file'), aliases: [origin], status: 206, contentRange: 'bytes 2-4/6' },
+  ];
+  const network = t.mock.method(globalThis, 'fetch', async () => { throw new Error('Unexpected replay'); });
+  const fetcher = new MediaFetcher(7);
+  assert.deepEqual(await fetcher.file({ url: origin, range: { offset: 2, length: 3 } }), new TextEncoder().encode('cde'));
+  assert.equal(network.mock.callCount(), 0);
   assert.equal(fetcher.bytes, 3);
 });

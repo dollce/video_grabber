@@ -1,17 +1,36 @@
 import type { CapturedResponse } from './types';
+import { httpUrl } from './detection';
 
 const DATABASE = 'video-grabber-capture';
 const STORE = 'responses';
 let opening: Promise<IDBDatabase> | undefined;
 
+/** Bound redirect metadata independently of the captured response body. */
+export function boundedAliases(url: string, values: readonly string[]): string[] {
+  const aliases: string[] = [];
+  let characters = 0;
+  for (const value of values) {
+    if (!httpUrl(value) || value === url || aliases.includes(value)) continue;
+    if (aliases.length >= 20 || characters + value.length > 32768) break;
+    aliases.push(value);
+    characters += value.length;
+  }
+  return aliases;
+}
+
 function database(): Promise<IDBDatabase> {
   if (!opening) {
     opening = new Promise((resolve, reject) => {
-      const request = indexedDB.open(DATABASE, 1);
+      const request = indexedDB.open(DATABASE, 2);
       request.onupgradeneeded = () => {
-        const store = request.result.createObjectStore(STORE, { keyPath: 'id' });
-        store.createIndex('tab', 'tabId');
-        store.createIndex('tabUrl', ['tabId', 'url']);
+        const store = request.result.objectStoreNames.contains(STORE)
+          ? request.transaction!.objectStore(STORE)
+          : request.result.createObjectStore(STORE, { keyPath: 'id' });
+        if (!store.indexNames.contains('tab')) store.createIndex('tab', 'tabId');
+        if (!store.indexNames.contains('tabUrl')) store.createIndex('tabUrl', ['tabId', 'url']);
+        // A single keyPath with multiEntry permits each key to be [tabId, URL].
+        // Version-1 records remain readable through their original tabUrl index.
+        if (!store.indexNames.contains('tabAlias')) store.createIndex('tabAlias', 'aliasKeys', { multiEntry: true });
       };
       request.onsuccess = () => {
         const db = request.result;
@@ -36,18 +55,23 @@ function completion(transaction: IDBTransaction): Promise<void> {
 export async function putCaptured(response: CapturedResponse): Promise<void> {
   const db = await database();
   const transaction = db.transaction(STORE, 'readwrite');
-  transaction.objectStore(STORE).put(response);
+  const aliases = boundedAliases(response.url, response.aliases ?? []);
+  transaction.objectStore(STORE).put({ ...response, aliases, aliasKeys: aliases.map(url => [response.tabId, url]) });
   await completion(transaction);
 }
 
-/** Exact URL lookup, oldest first, including repeated playlist snapshots. */
+/** Observed final/redirect URL lookup, oldest first, with one body per response. */
 export async function getCapturedResponses(tabId: number, url: string): Promise<CapturedResponse[]> {
   const db = await database();
-  return new Promise((resolve, reject) => {
-    const request = db.transaction(STORE).objectStore(STORE).index('tabUrl').getAll(IDBKeyRange.only([tabId, url]));
-    request.onsuccess = () => resolve((request.result as CapturedResponse[]).sort((a, b) => a.capturedAt - b.capturedAt));
+  const store = db.transaction(STORE).objectStore(STORE);
+  const lookup = (index: string) => new Promise<CapturedResponse[]>((resolve, reject) => {
+    const request = store.index(index).getAll(IDBKeyRange.only([tabId, url]));
+    request.onsuccess = () => resolve(request.result as CapturedResponse[]);
     request.onerror = () => reject(request.error);
   });
+  const matches = await Promise.all([lookup('tabUrl'), lookup('tabAlias')]);
+  return [...new Map(matches.flat().filter(record => record.tabId === tabId).map(record => [record.id, record])).values()]
+    .sort((a, b) => a.capturedAt - b.capturedAt);
 }
 
 export async function clearCaptured(tabId: number): Promise<void> {

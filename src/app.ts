@@ -85,7 +85,7 @@ function updateButtons(): void {
   ui.video.disabled = working || !ready || !inspection!.videos.length;
   ui.audio.disabled = working || !ready || !ui.audio.value;
   ui.title.disabled = working;
-  ui.downloadVideo.disabled = working || !ready || !inspection!.videos.length;
+  ui.downloadVideo.disabled = working || !ready || !inspection!.videos.length || !ui.audio.value;
   ui.downloadAudio.disabled = working || !ready || !ui.audio.value;
   ui.openSource.disabled = missingTab;
   for (const entry of rows.values()) entry.button.disabled = working;
@@ -181,7 +181,7 @@ function updateAudioChoices(): void {
   const previous = ui.audio.value;
   const allowed = inspection.videos.find(video => video.id === ui.video.value)?.audioIds;
   const choices = allowed ? inspection.audios.filter(audio => allowed.includes(audio.id)) : inspection.audios;
-  options(ui.audio, choices, '오디오 트랙 없음');
+  options(ui.audio, choices, '선택 가능한 오디오 없음');
   if (choices.some(audio => audio.id === previous)) ui.audio.value = previous;
   updateButtons();
 }

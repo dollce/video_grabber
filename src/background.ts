@@ -1,4 +1,4 @@
-import { clearAllCaptured, clearCaptured, putCaptured } from './shared/capture-store';
+import { boundedAliases, clearAllCaptured, clearCaptured, putCaptured } from './shared/capture-store';
 import { classifyMedia, headerValue, httpUrl, parseContentRange } from './shared/detection';
 import type { BackgroundReply, BackgroundRequest, MediaKind, TabSnapshot } from './shared/types';
 
@@ -14,6 +14,7 @@ let shuttingDown = false;
 interface PendingResponse {
   requestId: string;
   url: string;
+  aliases: string[];
   mime: string;
   status: number;
   contentRange?: string;
@@ -25,6 +26,7 @@ interface State {
   epoch: number;
   navigationId?: string;
   pending: Map<string, PendingResponse>;
+  redirects: Map<string, { url: string; aliases: string[] }>;
   tasks: Set<Promise<void>>;
   writes: Promise<void>;
   commands: Promise<unknown>;
@@ -35,7 +37,7 @@ interface State {
 function makeState(tabId: number, snapshot?: TabSnapshot): State {
   return {
     snapshot: snapshot ?? { tabId, title: '', url: '', resources: [], capture: { active: false, bytes: 0, count: 0 } },
-    epoch: 0, pending: new Map(), tasks: new Set(), writes: Promise.resolve(), commands: Promise.resolve(), stopping: false,
+    epoch: 0, pending: new Map(), redirects: new Map(), tasks: new Set(), writes: Promise.resolve(), commands: Promise.resolve(), stopping: false,
   };
 }
 function stateFor(tabId: number): State {
@@ -98,6 +100,7 @@ function record(state: State, url: string, mime: string, kind: MediaKind, size?:
 async function reset(state: State): Promise<void> {
   state.epoch++;
   state.pending.clear();
+  state.redirects.clear();
   state.snapshot.resources = [];
   state.snapshot.capture = { active: state.snapshot.capture.active, bytes: 0, count: 0, startedAt: state.snapshot.capture.active ? Date.now() : undefined };
   state.writes = state.writes.catch(() => undefined).then(() => clearCaptured(state.snapshot.tabId));
@@ -169,6 +172,7 @@ async function stop(state: State): Promise<void> {
   state.stopping = true;
   state.snapshot.capture.active = false;
   state.pending.clear();
+  state.redirects.clear();
   // Already completed responses may still be being read; finish them before detaching.
   await Promise.allSettled([...state.tasks]);
   await state.writes.catch(() => undefined);
@@ -183,6 +187,7 @@ function stopAtLimit(state: State): void {
   // Schedule after the current write resolves to avoid awaiting ourselves.
   state.snapshot.capture.active = false;
   state.pending.clear();
+  state.redirects.clear();
   queueMicrotask(() => { void stop(state); });
 }
 
@@ -210,7 +215,7 @@ async function captureBody(state: State, source: chrome.debugger.DebuggerSession
       if (state.epoch !== pending.epoch || states.get(state.snapshot.tabId) !== state) return;
       const capture = state.snapshot.capture;
       if (capture.bytes + bytes.byteLength > MAX_CAPTURE_BYTES || capture.count >= MAX_BODIES) { stopAtLimit(state); return; }
-      await putCaptured({ id: crypto.randomUUID(), tabId: state.snapshot.tabId, url: pending.url, mime: pending.mime, status: pending.status, contentRange: pending.contentRange, capturedAt: pending.capturedAt, body: new Blob([bytes], { type: pending.mime }) });
+      await putCaptured({ id: crypto.randomUUID(), tabId: state.snapshot.tabId, url: pending.url, aliases: pending.aliases, mime: pending.mime, status: pending.status, contentRange: pending.contentRange, capturedAt: pending.capturedAt, body: new Blob([bytes], { type: pending.mime }) });
       if (state.epoch !== pending.epoch) return;
       capture.bytes += bytes.byteLength;
       capture.count++;
@@ -239,8 +244,24 @@ chrome.debugger.onEvent.addListener((source, method, raw) => {
       return;
     }
     const key = `${source.sessionId ?? 'root'}:${params.requestId}`;
-    if (method === 'Network.responseReceived') {
+    if (method === 'Network.requestWillBeSent') {
+      // CDP reuses requestId throughout a redirect chain, but can reuse it for
+      // unrelated requests later. Only a contiguous observed redirect extends it.
+      const previous = state.redirects.get(key);
+      state.redirects.delete(key);
+      state.pending.delete(key);
+      const from = params.redirectResponse?.url, to = params.request?.url;
+      if (!httpUrl(from) || !httpUrl(to)) return;
+      const aliases = boundedAliases(to, [...(previous?.url === from ? previous.aliases : []), from]);
+      if (state.redirects.size >= MAX_PENDING) {
+        warn(state, '동시 리다이렉트 요청이 너무 많아 일부 주소 연결을 수집하지 못했습니다.');
+        return;
+      }
+      state.redirects.set(key, { url: to, aliases });
+    } else if (method === 'Network.responseReceived') {
       const response = params.response;
+      const redirect = state.redirects.get(key);
+      state.redirects.delete(key);
       if (!response || !httpUrl(response.url) || response.status < 200 || response.status >= 300) return;
       const mime = String(response.mimeType ?? '');
       const kind = classifyMedia(response.url, mime) ?? (params.type === 'Media' ? 'video' : undefined);
@@ -250,8 +271,9 @@ chrome.debugger.onEvent.addListener((source, method, raw) => {
         return;
       }
       record(state, response.url, mime, kind, undefined, false);
-      state.pending.set(key, { requestId: String(params.requestId), url: response.url, mime, status: response.status, contentRange: headerValue(response.headers ?? {}, 'content-range'), epoch: state.epoch, capturedAt: Date.now() });
+      state.pending.set(key, { requestId: String(params.requestId), url: response.url, aliases: redirect && redirect.url === response.url ? redirect.aliases : [], mime, status: response.status, contentRange: headerValue(response.headers ?? {}, 'content-range'), epoch: state.epoch, capturedAt: Date.now() });
     } else if (method === 'Network.loadingFinished') {
+      state.redirects.delete(key);
       const pending = state.pending.get(key);
       if (!pending) return;
       state.pending.delete(key);
@@ -263,12 +285,12 @@ chrome.debugger.onEvent.addListener((source, method, raw) => {
       state.tasks.add(task);
       void task.finally(() => state.tasks.delete(task));
     } else if (method === 'Network.loadingFailed') {
+      state.redirects.delete(key);
       if (state.pending.delete(key)) warn(state, '재생 페이지에서 미디어 요청이 중단되어 일부 응답이 수집되지 않았습니다.');
-    } else if (method === 'Network.requestWillBeSent' && params.redirectResponse) {
-      state.pending.delete(key);
     } else if (method === 'Target.detachedFromTarget') {
       const prefix = `${params.sessionId}:`;
       for (const requestKey of state.pending.keys()) if (requestKey.startsWith(prefix)) state.pending.delete(requestKey);
+      for (const requestKey of state.redirects.keys()) if (requestKey.startsWith(prefix)) state.redirects.delete(requestKey);
     }
   }).catch(() => undefined);
 });
@@ -281,6 +303,7 @@ chrome.debugger.onDetach.addListener((source, reason) => {
     const wasActive = state.snapshot.capture.active;
     state.snapshot.capture.active = false;
     state.pending.clear();
+    state.redirects.clear();
     if (wasActive) warn(state, reason === 'canceled_by_user' ? '브라우저에서 수집 연결을 해제했습니다. 다시 시작하려면 수집 시작을 눌러 주세요.' : '재생 탭 연결이 종료되어 수집을 중단했습니다.');
     persist(state);
   });
@@ -348,6 +371,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
       state.epoch++;
       state.snapshot.capture.active = false;
       state.pending.clear();
+      state.redirects.clear();
       if (state.timer) clearTimeout(state.timer);
       await state.writes.catch(() => undefined);
     }

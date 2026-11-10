@@ -13,6 +13,8 @@ const profile = await mkdtemp(resolve(tmpdir(), 'video-grabber-e2e-'));
 let context;
 const failures = [];
 const results = [];
+const captureProofs = [];
+let migrationProof;
 function validateMedia(file, audioOnly) {
   // Native FFmpeg fully decodes both selected streams; missing streams cause a nonzero exit.
   const args = ['-hide_banner', '-i', file, ...(!audioOnly ? ['-map', '0:v:0'] : []), '-map', '0:a:0', '-f', 'null', '-'];
@@ -86,6 +88,43 @@ try {
   await select('/direct.mp4');
   await download('direct-video');
   await download('direct-audio', true);
+
+  // Upgrade the original capture schema without losing its existing bodies.
+  migrationProof = await app.evaluate(async ({ tabId, url }) => {
+    const body = await (await fetch(url)).blob();
+    await new Promise((resolve, reject) => {
+      const request = indexedDB.deleteDatabase('video-grabber-capture');
+      request.onsuccess = resolve;
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise((resolve, reject) => {
+      const request = indexedDB.open('video-grabber-capture', 1);
+      request.onupgradeneeded = () => {
+        const store = request.result.createObjectStore('responses', { keyPath: 'id' });
+        store.createIndex('tab', 'tabId');
+        store.createIndex('tabUrl', ['tabId', 'url']);
+      };
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const db = request.result;
+        const transaction = db.transaction('responses', 'readwrite');
+        transaction.objectStore('responses').put({ id: 'legacy-direct', tabId, url, mime: 'video/mp4', status: 200, capturedAt: Date.now(), body });
+        transaction.oncomplete = () => { db.close(); resolve(); };
+        transaction.onerror = () => { db.close(); reject(transaction.error); };
+      };
+    });
+    return { previousVersion: 1, bytes: body.size };
+  }, { tabId, url: `${fixture.url}/direct.mp4` });
+  fixture.replay.blocked = true;
+  await download('legacy-capture-video');
+  fixture.replay.blocked = false;
+  const migratedVersion = await app.evaluate(() => new Promise((resolve, reject) => {
+    const request = indexedDB.open('video-grabber-capture');
+    request.onsuccess = () => { const db = request.result; resolve(db.version); db.close(); };
+    request.onerror = () => reject(request.error);
+  }));
+  assert.ok(migratedVersion > 1, 'the legacy store should be upgraded before cached replay');
+  migrationProof.currentVersion = migratedVersion;
   await play('hls');
   await select('/master.m3u8');
   await download('hls-video');
@@ -125,25 +164,81 @@ try {
   assert.ok(dashRedirectRequests.some(path => path.startsWith('/relocated-dash/chunk-stream')));
   assert.ok(!dashRedirectRequests.some(path => path.startsWith('/redirect-dash/') && path !== '/redirect-dash/stream.mpd'), 'DASH children must not use the pre-redirect base');
 
-  // Capture the actual playback responses. Disable subsequent HTTP replay to prove reuse.
-  await app.click('#capture-toggle');
-  await app.waitForFunction(() => document.querySelector('#capture-toggle').textContent.includes('중지'));
-  await player.reload();
-  await play('hls');
-  await player.waitForFunction(() => document.querySelector('video').ended);
-  await app.waitForFunction(async tabId => {
-    const reply = await chrome.runtime.sendMessage({ type: 'snapshot', tabId });
-    return reply.ok && reply.snapshot.capture.count >= 12;
-  }, tabId);
-  await app.click('#capture-toggle');
-  await app.waitForFunction(() => document.querySelector('#capture-toggle').textContent.includes('시작'));
-  const captured = await snapshot();
-  assert.ok(captured.snapshot.capture.bytes > 0);
-  for (const resource of captured.snapshot.resources) fixture.blocked.add(new URL(resource.url).pathname);
-  await select('/master.m3u8');
-  await download('captured-hls-video');
-  await download('captured-hls-audio', true);
-  fixture.blocked.clear();
+  // Capture both ordinary playback and redirected playlists/media files, then
+  // deny every subsequent fixture request, including original redirect URLs.
+  for (const [mode, master, prefix] of [
+    ['hls', '/master.m3u8', 'captured-hls'],
+    ['hls-redirect', '/redirect-hls/master.m3u8', 'captured-redirected-hls'],
+  ]) {
+    await app.click('#capture-toggle');
+    await app.waitForFunction(() => document.querySelector('#capture-toggle').textContent.includes('중지'));
+    await player.reload();
+    const playbackStart = fixture.requests.length;
+    await play(mode);
+    await player.waitForFunction(() => document.querySelector('video').ended);
+    await app.waitForFunction(async tabId => {
+      const reply = await chrome.runtime.sendMessage({ type: 'snapshot', tabId });
+      return reply.ok && reply.snapshot.capture.count >= 12;
+    }, tabId);
+    await app.click('#capture-toggle');
+    await app.waitForFunction(() => document.querySelector('#capture-toggle').textContent.includes('시작'));
+    const captured = await snapshot();
+    assert.ok(captured.snapshot.capture.bytes > 0);
+    const aliasQueries = mode === 'hls-redirect' ? [
+      ['/redirect-hls/video.m3u8', '/relocated-hls/video/video.m3u8'],
+      ['/redirect-hls/audio.m3u8', '/relocated-hls/audio/audio.m3u8'],
+      ['/relocated-hls/video/video-000.ts', '/delivered-hls/video/video-000.ts'],
+      ['/relocated-hls/audio/audio-000.ts', '/delivered-hls/audio/audio-000.ts'],
+    ].map(([url, finalUrl]) => ({ url: fixture.url + url, finalUrl: fixture.url + finalUrl })) : [];
+    const stored = await app.evaluate(({ tabId, aliases }) => new Promise((resolve, reject) => {
+      const request = indexedDB.open('video-grabber-capture');
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const db = request.result;
+        const store = db.transaction('responses').objectStore('responses');
+        const read = query => new Promise((resolve, reject) => {
+          query.onsuccess = () => resolve(query.result);
+          query.onerror = () => reject(query.error);
+        });
+        const records = read(store.index('tab').getAll(IDBKeyRange.only(tabId)));
+        const lookups = aliases.map(({ url, finalUrl }) => Promise.all([
+          read(store.index('tabAlias').getAll(IDBKeyRange.only([tabId, url]))),
+          read(store.index('tabUrl').getAll(IDBKeyRange.only([tabId, finalUrl]))),
+          read(store.index('tabAlias').getAll(IDBKeyRange.only([tabId + 100000, url]))),
+        ]).then(([matching, primary, foreign]) => ({ url, finalUrl, ids: matching.map(row => row.id), primaryIds: primary.map(row => row.id), foreignCount: foreign.length })));
+        Promise.all([records, Promise.all(lookups)]).then(([rows, aliases]) => {
+          resolve({ rows: rows.map(record => ({ url: record.url, size: record.body.size })), aliases });
+          db.close();
+        }, error => { db.close(); reject(error); });
+      };
+    }), { tabId, aliases: aliasQueries });
+    const { rows } = stored;
+    assert.equal(rows.length, captured.snapshot.capture.count, 'aliases must not create duplicate body records');
+    assert.equal(rows.reduce((sum, row) => sum + row.size, 0), captured.snapshot.capture.bytes, 'body bytes are charged once');
+    if (mode === 'hls-redirect') {
+      const playbackRequests = fixture.requests.slice(playbackStart);
+      for (const path of ['/redirect-hls/video.m3u8', '/redirect-hls/audio.m3u8', '/relocated-hls/video/video-000.ts', '/relocated-hls/audio/audio-000.ts']) {
+        assert.ok(playbackRequests.some(request => request.path === path && request.status === 302), `redirect observed: ${path}`);
+      }
+      assert.ok(rows.some(row => row.url.endsWith('/delivered-hls/video/video-000.ts')));
+      assert.ok(rows.some(row => row.url.endsWith('/delivered-hls/audio/audio-000.ts')));
+      for (const alias of stored.aliases) {
+        assert.ok(alias.ids.length > 0, `alias indexed: ${alias.url}`);
+        assert.ok(alias.ids.every(id => alias.primaryIds.includes(id)), 'an alias must refer to the same stored body as its final URL');
+        assert.equal(alias.foreignCount, 0, 'alias lookup must remain tab-scoped');
+      }
+    }
+    const replayStart = fixture.requests.length;
+    fixture.replay.blocked = true;
+    await select(master);
+    await download(`${prefix}-video`);
+    await download(`${prefix}-audio`, true);
+    const denied = fixture.requests.slice(replayStart);
+    assert.ok(denied.length > 0, 'manifest refresh attempts should exercise denied replay');
+    assert.ok(denied.every(request => request.status === 403), 'every network replay response must be denied');
+    fixture.replay.blocked = false;
+    captureProofs.push({ mode, capture: captured.snapshot.capture, deniedRequests: denied.length, bodies: rows.length, aliasesChecked: stored.aliases.length });
+  }
   await app.screenshot({ path: 'artifacts/e2e/manager.png', fullPage: true });
   await app.click('#clear');
   await app.waitForFunction(async tabId => {
@@ -151,7 +246,7 @@ try {
     return reply.ok && reply.snapshot.capture.count === 0 && reply.snapshot.resources.length === 0;
   }, tabId);
   assert.deepEqual(failures, []);
-  await writeFile('artifacts/e2e/results.json', JSON.stringify({ browser: context.browser()?.version(), passed: results, capture: captured.snapshot.capture, pageErrors: failures }, null, 2));
+  await writeFile('artifacts/e2e/results.json', JSON.stringify({ browser: context.browser()?.version(), passed: results, capture: captureProofs[0].capture, captures: captureProofs, migration: migrationProof, pageErrors: failures }, null, 2));
   // The removal helper closes managers, clears extension-owned data, then removes itself.
   const removal = await context.newPage();
   await removal.goto(`chrome-extension://${extensionId}/uninstall.html`);
