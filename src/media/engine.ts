@@ -1,6 +1,6 @@
 import type { FFmpeg } from '@ffmpeg/ffmpeg';
 import type { BackgroundReply, DownloadRequest, JobProgress, MediaInspection, MediaResource, RemoteFile, TrackChoice } from '../shared/types';
-import { MediaFetcher } from './fetcher';
+import { MediaFetcher, type ManifestSnapshot } from './fetcher';
 import { safeFilename } from './bytes';
 import { parseDash, parseHls, type DashRepresentation, type HlsMaster, type HlsMedia } from './manifests';
 
@@ -10,17 +10,17 @@ const quality = (track: { height?: number; bandwidth: number }) =>
   [track.height ? `${track.height}p` : '원본', track.bandwidth ? `${Math.round(track.bandwidth / 1000)} kbps` : ''].filter(Boolean).join(' / ');
 const highest = <T extends { bandwidth: number }>(tracks: T[]): T[] => [...tracks].sort((a, b) => b.bandwidth - a.bandwidth);
 // A login redirect may return HTML with HTTP 200. It must not replace a captured manifest.
-export function parseManifestSnapshots<T>(texts: string[], url: string, parser: (text: string, url: string) => T): T[] {
+export function parseManifestSnapshots<T>(snapshots: ManifestSnapshot[], parser: (text: string, url: string) => T): T[] {
   const parsed: T[] = [];
   let lastError: unknown;
-  for (const text of texts) {
+  for (const { text, url } of snapshots) {
     try { parsed.push(parser(text, url)); } catch (error) { lastError = error; }
   }
   if (!parsed.length) throw lastError ?? new Error('사용 가능한 재생 목록이 없습니다.');
   return parsed;
 }
-const latestHls = async (fetcher: MediaFetcher, url: string) => parseManifestSnapshots(await fetcher.manifests(url), url, parseHls).at(-1)!;
-const latestDash = async (fetcher: MediaFetcher, url: string) => parseManifestSnapshots(await fetcher.manifests(url), url, parseDash).at(-1)!;
+const latestHls = async (fetcher: MediaFetcher, url: string) => parseManifestSnapshots(await fetcher.manifests(url), parseHls).at(-1)!;
+const latestDash = async (fetcher: MediaFetcher, url: string) => parseManifestSnapshots(await fetcher.manifests(url), parseDash).at(-1)!;
 
 export async function inspectMedia(resource: MediaResource, tabId: number, signal?: AbortSignal): Promise<MediaInspection> {
   const fetcher = new MediaFetcher(tabId, signal);
@@ -87,7 +87,7 @@ export function combineHlsWindows(windows: HlsMedia[]): HlsMedia {
 }
 
 async function hlsWindows(fetcher: MediaFetcher, url: string): Promise<HlsMedia> {
-  const windows = parseManifestSnapshots(await fetcher.manifests(url), url, parseHls);
+  const windows = parseManifestSnapshots(await fetcher.manifests(url), parseHls);
   if (windows.some(window => window.type !== 'media')) throw new Error('중첩된 HLS 마스터 목록은 지원하지 않습니다. 미디어 목록을 선택해 주세요.');
   return combineHlsWindows(windows as HlsMedia[]);
 }

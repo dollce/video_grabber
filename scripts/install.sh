@@ -17,11 +17,15 @@ while [ "$#" -gt 0 ]; do
 done
 vg_validate_target "$target"
 target="$VG_TARGET"
-case "$PACKAGE_ROOT/" in "$target/"*) vg_die '설치 폴더 안의 파일에서 설치를 다시 실행할 수 없습니다. 원본 릴리스에서 실행하세요.' ;; esac
+if vg_path_within "$PACKAGE_ROOT" "$target"; then
+  vg_die '설치 폴더 안의 파일에서 설치를 다시 실행할 수 없습니다. 원본 릴리스에서 실행하세요.'
+fi
 if vg_project_files "$PACKAGE_ROOT"; then
   # npm ci and the build replace source-owned artifact directories. Keep both
   # the existing installation and its staging directory outside that tree.
-  case "$target/" in "$PACKAGE_ROOT/"*) vg_die '설치 경로는 소스 체크아웃 밖에 있어야 합니다. 빌드 중 기존 설치가 삭제될 수 있어 중단했습니다.' ;; esac
+  if vg_path_within "$target" "$PACKAGE_ROOT"; then
+    vg_die '설치 경로는 소스 체크아웃 밖에 있어야 합니다. 빌드 중 기존 설치가 삭제될 수 있어 중단했습니다.'
+  fi
 fi
 [ ! -d "$PACKAGE_ROOT/extension" ] || [ -f "$PACKAGE_ROOT/SHA256SUMS" ] || vg_die '릴리스의 SHA256SUMS가 없습니다. 공식 릴리스 ZIP을 다시 받아 주세요.'
 vg_verify_package "$PACKAGE_ROOT"

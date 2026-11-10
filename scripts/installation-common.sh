@@ -36,6 +36,23 @@ vg_no_symlink_ancestors() {
   done
 }
 
+vg_path_within() {
+  # Compare existing directory identities, not spelling. This respects each
+  # filesystem's case rules and still handles a child whose suffix is absent.
+  local checked="${1%/}" ancestor="${2%/}"
+  [ -n "$checked" ] || checked=/
+  [ -n "$ancestor" ] || ancestor=/
+  vg_absolute_path "$checked"
+  vg_absolute_path "$ancestor"
+  [ -d "$ancestor" ] || return 1
+  while true; do
+    [ ! "$checked" -ef "$ancestor" ] || return 0
+    [ "$checked" != / ] || return 1
+    checked="${checked%/*}"
+    [ -n "$checked" ] || checked=/
+  done
+}
+
 vg_validate_target() {
   VG_TARGET="${1%/}"
   vg_absolute_path "$VG_TARGET"
@@ -45,7 +62,7 @@ vg_validate_target() {
   esac
   local parent="${VG_TARGET%/*}"
   [ -n "$parent" ] && [ "$parent" != / ] && [ "${parent%/*}" != '' ] || vg_die '파일시스템 최상위에는 설치하거나 삭제할 수 없습니다.'
-  [ "$VG_TARGET" != "$HOME" ] || vg_die '사용자 홈 폴더를 설치 폴더로 사용할 수 없습니다.'
+  [ "$VG_TARGET" != "$HOME" ] && [ ! "$VG_TARGET" -ef "$HOME" ] || vg_die '사용자 홈 폴더를 설치 폴더로 사용할 수 없습니다.'
   vg_no_symlink_ancestors "$VG_TARGET"
   if [ -e "$VG_TARGET" ]; then
     [ -d "$VG_TARGET" ] || vg_die '설치 경로가 폴더가 아닙니다.'
@@ -143,7 +160,9 @@ vg_validate_source_history() {
     while IFS= read -r other; do
       [ -n "$other" ] || continue
       for item in node_modules dist artifacts fixtures/media .cache .logs; do
-        case "$other/" in "$path/$item/"*) vg_die '기록된 소스 폴더가 다른 소스의 삭제 대상 안에 있어 정리를 중단했습니다.' ;; esac
+        if vg_path_within "$other" "$path/$item"; then
+          vg_die '기록된 소스 폴더가 다른 소스의 삭제 대상 안에 있어 정리를 중단했습니다.'
+        fi
       done
     done <<< "$VG_SOURCE_ROOTS"
   done <<< "$VG_SOURCE_ROOTS"

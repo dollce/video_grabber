@@ -261,6 +261,87 @@ test('source installs reject destinations inside the checkout before npm or stag
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test('source installs reject case aliases before npm or staging can alter existing installs', async (context) => {
+  const root = await temporary();
+  try {
+    const source = await sourceFixture(root, 'source');
+    const alias = resolve(root, 'SOURCE/BUNDLE');
+    if (!await exists(alias)) return context.skip('The temporary filesystem distinguishes case aliases.');
+    const originalStat = await lstat(source);
+    const aliasStat = await lstat(alias);
+    assert.equal(aliasStat.dev, originalStat.dev);
+    assert.equal(aliasStat.ino, originalStat.ino);
+    const bin = await fakeNpm(root);
+    for (const artifact of ['node_modules', 'dist', 'artifacts', 'fixtures/media', '.cache', '.logs', 'custom']) {
+      const parent = resolve(source, artifact);
+      const target = resolve(parent, 'video-grabber');
+      await mkdir(target, { recursive: true });
+      await writeFile(resolve(target, '.video-grabber-owned'), 'video-grabber-install-v1\n');
+      await writeFile(resolve(target, 'previous-install.bin'), 'existing installation');
+      const result = installSource(source, resolve(alias, artifact, 'video-grabber'), bin);
+      assert.notEqual(result.status, 0, artifact);
+      assert.match(result.stderr, /소스 체크아웃 밖/, artifact);
+      assert.equal(await readFile(resolve(target, 'previous-install.bin'), 'utf8'), 'existing installation');
+      assert.deepEqual(await readdir(parent), ['video-grabber'], 'no stage or backup may be created');
+    }
+    const absentParent = resolve(alias, 'not-created/nested');
+    const absent = installSource(source, resolve(absentParent, 'video-grabber'), bin);
+    assert.notEqual(absent.status, 0);
+    assert.match(absent.stderr, /소스 체크아웃 밖/);
+    assert.equal(await exists(resolve(source, 'not-created')), false, 'missing parent must stay absent');
+    assert.equal(await exists(resolve(source, 'npm-invocations.txt')), false, 'npm must not run');
+    assert.equal(await exists(resolve(source, '.video-grabber-build-root')), false, 'validation precedes source marker creation');
+    await assertSourcePreserved(source);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('source installation permits distinct sibling paths using the filesystem case rules', async () => {
+  const root = await temporary();
+  try {
+    const source = await sourceFixture(root, 'source');
+    const bin = await fakeNpm(root);
+    const siblingTarget = `${source}-sibling/video-grabber`;
+    const installed = installSource(source, siblingTarget, bin);
+    assert.equal(installed.status, 0, installed.stderr);
+    assert.equal(run(siblingTarget, 'uninstall', siblingTarget, ['--browser-removed']).status, 0);
+    const caseDistinct = resolve(root, 'SOURCE/BUNDLE');
+    if (!await exists(caseDistinct)) {
+      const caseTarget = resolve(caseDistinct, 'node_modules/video-grabber');
+      const installedCase = installSource(source, caseTarget, bin);
+      assert.equal(installedCase.status, 0, installedCase.stderr);
+      assert.equal(run(caseTarget, 'uninstall', caseTarget, ['--browser-removed']).status, 0);
+    }
+    await assertSourcePreserved(source);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('uninstall refuses case-alias source history contained in another source artifact directory', async (context) => {
+  const root = await temporary();
+  try {
+    const sourceA = await sourceFixture(root, 'source-a');
+    const sourceB = await sourceFixture(resolve(sourceA, 'NODE_MODULES'), 'source-b');
+    if (!await exists(resolve(sourceA, 'node_modules/source-b/bundle'))) return context.skip('The temporary filesystem distinguishes case aliases.');
+    const release = await fixture(resolve(root, 'release'));
+    const target = resolve(root, 'managed/video-grabber');
+    assert.equal(run(release, 'install', target).status, 0);
+    for (const source of [sourceA, sourceB]) {
+      await writeFile(resolve(source, '.video-grabber-build-root'), `video-grabber-build-v1\n${source}\n`);
+      await mkdir(resolve(source, 'dist'));
+      await writeFile(resolve(source, 'dist/generated'), 'owned artifact');
+    }
+    await writeFile(resolve(target, 'source-roots.txt'), `${sourceA}\n${sourceB}\n`);
+    const removed = run(target, 'uninstall', target, ['--browser-removed']);
+    assert.notEqual(removed.status, 0);
+    assert.match(removed.stderr, /다른 소스의 삭제 대상/);
+    for (const source of [sourceA, sourceB]) {
+      await assertSourcePreserved(source);
+      assert.equal(await readFile(resolve(source, 'dist/generated'), 'utf8'), 'owned artifact');
+      assert.equal(await exists(resolve(source, '.video-grabber-build-root')), true);
+    }
+    assert.equal(await exists(resolve(target, 'extension/manifest.json')), true);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test('source A to B to release upgrades retain deduplicated provenance and remove artifacts from every checkout', async () => {
   const root = await temporary();
   try {

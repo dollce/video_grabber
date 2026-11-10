@@ -105,6 +105,26 @@ try {
   await app.selectOption('#audio-track', `resource:${fixture.url}/audio.m4a`);
   await download('separate-video');
 
+  // Relative segment references must use each redirected playlist's final URL.
+  await play('hls-redirect');
+  const hlsRedirectStart = fixture.requests.length;
+  await select('/redirect-hls/master.m3u8');
+  await download('redirected-hls-video');
+  const hlsRedirectRequests = fixture.requests.slice(hlsRedirectStart).map(request => request.path);
+  assert.ok(hlsRedirectRequests.includes('/relocated-hls/video/video-000.ts'));
+  assert.ok(hlsRedirectRequests.includes('/relocated-hls/audio/audio-000.ts'));
+  assert.ok(!hlsRedirectRequests.some(path => /^\/redirect-hls\/.+\.ts$/.test(path)), 'HLS segments must not use the pre-redirect base');
+
+  await play('dash-redirect');
+  fixture.redirects.set('/redirect-dash/stream.mpd', '/relocated-dash/stream.mpd');
+  const dashRedirectStart = fixture.requests.length;
+  await select('/redirect-dash/stream.mpd');
+  await download('redirected-dash-video');
+  const dashRedirectRequests = fixture.requests.slice(dashRedirectStart).map(request => request.path);
+  assert.ok(dashRedirectRequests.some(path => path.startsWith('/relocated-dash/init-stream')));
+  assert.ok(dashRedirectRequests.some(path => path.startsWith('/relocated-dash/chunk-stream')));
+  assert.ok(!dashRedirectRequests.some(path => path.startsWith('/redirect-dash/') && path !== '/redirect-dash/stream.mpd'), 'DASH children must not use the pre-redirect base');
+
   // Capture the actual playback responses. Disable subsequent HTTP replay to prove reuse.
   await app.click('#capture-toggle');
   await app.waitForFunction(() => document.querySelector('#capture-toggle').textContent.includes('중지'));

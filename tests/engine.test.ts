@@ -10,10 +10,13 @@ function window(sequence: number, files: string[], endList = false): HlsMedia {
 
 test('login HTML cannot replace valid captured manifests', () => {
   const valid = '#EXTM3U\n#EXTINF:2,\na.ts\n#EXT-X-ENDLIST\n';
-  const parsed = parseManifestSnapshots([valid, '<html>Sign in</html>'], 'https://example.test/list.m3u8', parseHls);
+  const parsed = parseManifestSnapshots([
+    { text: valid, url: 'https://example.test/list.m3u8' },
+    { text: '<html>Sign in</html>', url: 'https://accounts.example.test/login' },
+  ], parseHls);
   assert.equal(parsed.length, 1);
   assert.equal(parsed[0].type, 'media');
-  assert.throws(() => parseManifestSnapshots(['<html>Sign in</html>'], 'https://example.test/list.m3u8', parseHls));
+  assert.throws(() => parseManifestSnapshots([{ text: '<html>Sign in</html>', url: 'https://accounts.example.test/login' }], parseHls));
 });
 
 test('live HLS joins overlapping windows in sequence order without duplicate segments', () => {

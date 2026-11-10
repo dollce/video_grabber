@@ -4,6 +4,9 @@ import { bytesFromCaptured, parseContentRange } from './bytes';
 
 export const MAX_JOB_BYTES = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 8 * 1024 * 1024;
+/** Relative references belong to the response URL, which may differ after redirects. */
+export interface ManifestSnapshot { text: string; url: string }
+interface MediaResponse { bytes: Uint8Array; url: string }
 export class MediaFetcher {
   bytes = 0;
   constructor(readonly tabId: number, readonly signal?: AbortSignal) {}
@@ -12,23 +15,32 @@ export class MediaFetcher {
     this.signal?.throwIfAborted();
     const cached = await bytesFromCaptured(await getCapturedResponses(this.tabId, file.url), file.range);
     if (cached) return this.account(cached);
-    return this.account(await this.network(file));
+    return this.account((await this.network(file)).bytes);
   }
 
-  async manifests(url: string): Promise<string[]> {
+  async manifests(url: string): Promise<ManifestSnapshot[]> {
     const captured = await getCapturedResponses(this.tabId, url);
-    const texts: string[] = [];
+    const snapshots: ManifestSnapshot[] = [];
     for (const record of captured) {
-      if (record.status === 200 && record.body.size <= MAX_MANIFEST_BYTES) texts.push(await record.body.text());
+      // Captured records already use Network.responseReceived's final response URL.
+      if (record.status === 200 && record.body.size <= MAX_MANIFEST_BYTES) snapshots.push({ text: await record.body.text(), url: record.url });
     }
     try {
       const latest = await this.network({ url }, MAX_MANIFEST_BYTES);
-      texts.push(new TextDecoder().decode(latest));
+      snapshots.push({ text: new TextDecoder().decode(latest.bytes), url: latest.url });
     } catch (error) {
       this.signal?.throwIfAborted();
-      if (!texts.length) throw error;
+      if (!snapshots.length) throw error;
     }
-    return [...new Set(texts)];
+    const unique = new Map<string, ManifestSnapshot>();
+    for (const snapshot of snapshots) {
+      const key = JSON.stringify([snapshot.url, snapshot.text]);
+      // Keep the newest occurrence last so latest-manifest selection remains
+      // correct even when a playlist returns to an earlier captured body.
+      unique.delete(key);
+      unique.set(key, snapshot);
+    }
+    return [...unique.values()];
   }
 
   private account(data: Uint8Array): Uint8Array {
@@ -37,7 +49,7 @@ export class MediaFetcher {
     return data;
   }
 
-  private async network(file: RemoteFile, limit = MAX_JOB_BYTES - this.bytes): Promise<Uint8Array> {
+  private async network(file: RemoteFile, limit = MAX_JOB_BYTES - this.bytes): Promise<MediaResponse> {
     const url = new URL(file.url);
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('HTTP(S) 미디어 주소만 지원합니다.');
     let lastError: unknown;
@@ -53,6 +65,11 @@ export class MediaFetcher {
         if (!response.ok) {
           await response.body?.cancel();
           throw new Error(`미디어 요청 실패 (HTTP ${response.status}). 원본 페이지에서 수집을 시작하고 다시 재생해 주세요.`);
+        }
+        const effectiveUrl = new URL(response.url || url.href);
+        if (!['http:', 'https:'].includes(effectiveUrl.protocol) || effectiveUrl.username || effectiveUrl.password) {
+          await response.body?.cancel();
+          throw new Error('HTTP(S) 미디어 주소만 지원합니다.');
         }
         const length = Number(response.headers.get('content-length'));
         if (length > limit) {
@@ -84,13 +101,13 @@ export class MediaFetcher {
           if (!range || range.start !== wanted.offset || bytes.length !== wanted.length || range.end + 1 !== wanted.offset + wanted.length) {
             throw new Error('서버가 요청한 바이트 구간과 다른 데이터를 반환했습니다.');
           }
-          return bytes;
+          return { bytes, url: effectiveUrl.href };
         }
         if (file.range) {
           if (bytes.length < file.range.offset + file.range.length) throw new Error('미디어 바이트 구간이 파일 크기를 벗어났습니다.');
-          return bytes.slice(file.range.offset, file.range.offset + file.range.length);
+          return { bytes: bytes.slice(file.range.offset, file.range.offset + file.range.length), url: effectiveUrl.href };
         }
-        return bytes;
+        return { bytes, url: effectiveUrl.href };
       } catch (error) { lastError = error; this.signal?.throwIfAborted(); }
     }
     throw lastError;

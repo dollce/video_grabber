@@ -10,8 +10,9 @@ async function append(buffer, bytes) {
     buffer.appendBuffer(bytes);
   });
 }
-async function playDash() {
-  const manifest = await (await fetch('/stream.mpd')).text();
+async function playDash(url = '/stream.mpd') {
+  const response = await fetch(url);
+  const manifest = await response.text();
   const doc = new DOMParser().parseFromString(manifest, 'application/xml');
   mediaSource = new MediaSource();
   video.src = URL.createObjectURL(mediaSource);
@@ -24,11 +25,11 @@ async function playDash() {
   for (const { representation, buffer } of tracks) {
     const template = representation.querySelector('SegmentTemplate');
     const expand = (text, number) => text.replaceAll('$RepresentationID$', representation.id).replace(/\$Number(?:%0(\d+)d)?\$/g, (_, width) => String(number).padStart(Number(width || 0), '0'));
-    await append(buffer, await (await fetch('/' + expand(template.getAttribute('initialization'), 0))).arrayBuffer());
+    await append(buffer, await (await fetch(new URL(expand(template.getAttribute('initialization'), 0), response.url))).arrayBuffer());
     let count = 0;
     for (const entry of template.querySelectorAll('S')) count += Number(entry.getAttribute('r') || 0) + 1;
     const start = Number(template.getAttribute('startNumber') || 1);
-    for (let index = 0; index < count; index++) await append(buffer, await (await fetch('/' + expand(template.getAttribute('media'), start + index))).arrayBuffer());
+    for (let index = 0; index < count; index++) await append(buffer, await (await fetch(new URL(expand(template.getAttribute('media'), start + index), response.url))).arrayBuffer());
   }
   mediaSource.endOfStream();
   await video.play();
@@ -39,13 +40,13 @@ document.querySelector('#play').addEventListener('click', async () => {
   status.textContent = '재생 준비 중';
   try {
     const mode = document.querySelector('#mode').value;
-    if (['hls', 'fmp4', 'range'].includes(mode)) {
+    if (['hls', 'hls-redirect', 'fmp4', 'range'].includes(mode)) {
       hls = new Hls();
-      hls.loadSource(mode === 'hls' ? '/master.m3u8' : mode === 'fmp4' ? '/master-fmp4.m3u8' : '/range.m3u8');
+      hls.loadSource({ hls: '/master.m3u8', 'hls-redirect': '/redirect-hls/master.m3u8', fmp4: '/master-fmp4.m3u8', range: '/range.m3u8' }[mode]);
       hls.attachMedia(video);
       await new Promise((resolve, reject) => { hls.on(Hls.Events.MANIFEST_PARSED, resolve); hls.on(Hls.Events.ERROR, (_, data) => { if (data.fatal) reject(new Error(data.details)); }); });
       await video.play();
-    } else if (mode === 'dash') await playDash();
+    } else if (mode === 'dash' || mode === 'dash-redirect') await playDash(mode === 'dash' ? '/stream.mpd' : '/redirect-dash/stream.mpd');
     else {
       video.src = mode === 'separate' ? '/video-only.mp4' : '/direct.mp4';
       if (mode === 'separate') { audio.src = '/audio.m4a'; await audio.play(); }
