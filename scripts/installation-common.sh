@@ -71,6 +71,22 @@ vg_validate_target() {
   fi
 }
 
+vg_no_managed_descendants() {
+  local path="$1" nested
+  [ -d "$path" ] || return 0
+  nested="$(find "$path" -mindepth 2 -name .video-grabber-owned -print -quit)" || vg_die '하위 설치 경로를 확인할 수 없어 변경하지 않습니다.'
+  [ -z "$nested" ] || vg_die '다른 관리 설치 폴더를 포함하는 경로는 변경하지 않습니다. 안쪽 설치를 먼저 제거하세요.'
+}
+
+vg_no_managed_ancestors() {
+  local path="${1%/*}"
+  while [ -n "$path" ] && [ "$path" != / ]; do
+    [ ! -e "$path/.video-grabber-owned" ] && [ ! -L "$path/.video-grabber-owned" ] || vg_die '다른 관리 설치 폴더 안에는 설치할 수 없습니다.'
+    [ ! -e "$path/.video-grabber-build-root" ] && [ ! -L "$path/.video-grabber-build-root" ] || vg_die '설치 경로는 소유 표시가 있는 소스 체크아웃 밖에 있어야 합니다.'
+    path="${path%/*}"
+  done
+}
+
 vg_project_files() {
   local path="$1"
   [ -f "$path/package.json" ] && [ ! -L "$path/package.json" ] &&
@@ -101,7 +117,25 @@ vg_validate_source_artifacts() {
   vg_no_symlink_ancestors "$path/.video-grabber-build-root"
   for item in node_modules dist artifacts fixtures/media .cache .logs; do
     vg_no_symlink_ancestors "$path/$item"
+    [ ! -e "$path/$item/.video-grabber-owned" ] && [ ! -L "$path/$item/.video-grabber-owned" ] || vg_die '소스 삭제 대상에 관리 설치가 있어 정리를 중단했습니다. 안쪽 설치를 먼저 제거하세요.'
+    vg_no_managed_descendants "$path/$item"
   done
+}
+
+vg_source_cleaned() {
+  # Another installation may already have removed this shared checkout's build
+  # output. Missing ownership is safe only when there is nothing left to erase.
+  local path="$1" item
+  vg_project_files "$path" || return 1
+  vg_validate_source_artifacts "$path"
+  [ ! -e "$path/.video-grabber-build-root" ] && [ ! -L "$path/.video-grabber-build-root" ] || return 1
+  for item in node_modules dist artifacts fixtures/media .cache .logs; do
+    [ ! -e "$path/$item" ] && [ ! -L "$path/$item" ] || return 1
+  done
+}
+
+vg_source_ready() {
+  vg_source_owned "$1" || vg_source_cleaned "$1"
 }
 
 vg_has_source_root() {
@@ -119,7 +153,7 @@ vg_add_source_root() {
   vg_no_symlink_ancestors "$path"
   [ -e "$path" ] || return 0
   if [ "$require_owned" -eq 1 ]; then
-    vg_source_owned "$path" || vg_die '기록된 소스 폴더의 소유 표시가 일치하지 않아 변경하지 않습니다.'
+    vg_source_ready "$path" || vg_die '기록된 소스 폴더의 소유 표시가 일치하지 않아 변경하지 않습니다.'
   else vg_project_files "$path" || vg_die '확인된 Video Grabber 소스 폴더가 아닙니다.'
   fi
   vg_validate_source_artifacts "$path"
@@ -154,7 +188,7 @@ vg_validate_source_history() {
     [ -e "$path" ] || continue
     if [ "$path" = "$VG_DIRECT_SOURCE_ROOT" ]; then
       vg_project_files "$path" || vg_die '실행 중인 소스 폴더가 변경되어 정리를 중단했습니다.'
-    else vg_source_owned "$path" || vg_die '기록된 소스 폴더의 소유 표시가 일치하지 않아 변경하지 않습니다.'
+    else vg_source_ready "$path" || vg_die '기록된 소스 폴더의 소유 표시가 일치하지 않아 변경하지 않습니다.'
     fi
     vg_validate_source_artifacts "$path"
     while IFS= read -r other; do
@@ -169,8 +203,13 @@ vg_validate_source_history() {
 }
 
 vg_write_source_history() {
-  local root="$1"
-  [ -z "$VG_SOURCE_ROOTS" ] || printf '%s\n' "$VG_SOURCE_ROOTS" > "$root/source-roots.txt"
+  local root="$1" pending
+  [ -n "$VG_SOURCE_ROOTS" ] || return 0
+  pending="$(mktemp "$root/.source-roots.XXXXXX")" || vg_die '소스 경로 기록을 준비할 수 없습니다.'
+  if ! printf '%s\n' "$VG_SOURCE_ROOTS" > "$pending" || ! mv -- "$pending" "$root/source-roots.txt"; then
+    rm -f -- "$pending"
+    vg_die '소스 경로 기록을 저장할 수 없어 빌드를 중단했습니다.'
+  fi
 }
 
 vg_source_artifacts() {

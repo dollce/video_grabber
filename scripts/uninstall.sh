@@ -20,6 +20,7 @@ while [ "$#" -gt 0 ]; do
 done
 vg_validate_target "$target"
 target="$VG_TARGET"
+vg_no_managed_descendants "$target"
 vg_load_source_history "$target"
 # A launcher run from its own checkout can also clean pre-installer build artifacts.
 if vg_project_files "$PACKAGE_ROOT" && { [ -d "$PACKAGE_ROOT/.git" ] || [ -f "$PACKAGE_ROOT/.git" ] || vg_source_owned "$PACKAGE_ROOT"; }; then
@@ -45,6 +46,7 @@ fi
 # root. An invalid later entry must never leave earlier checkouts half-cleaned.
 vg_validate_source_history
 vg_validate_target "$target"
+vg_no_managed_descendants "$target"
 while IFS= read -r source_root; do
   [ -n "$source_root" ] && [ -e "$source_root" ] || continue
   vg_source_artifacts "$source_root"

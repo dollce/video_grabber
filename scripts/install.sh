@@ -17,6 +17,8 @@ while [ "$#" -gt 0 ]; do
 done
 vg_validate_target "$target"
 target="$VG_TARGET"
+vg_no_managed_ancestors "$target"
+vg_no_managed_descendants "$target"
 if vg_path_within "$PACKAGE_ROOT" "$target"; then
   vg_die '설치 폴더 안의 파일에서 설치를 다시 실행할 수 없습니다. 원본 릴리스에서 실행하세요.'
 fi
@@ -57,7 +59,17 @@ elif vg_project_files "$PACKAGE_ROOT"; then
   vg_mark_source "$PACKAGE_ROOT"
   vg_add_source_root "$PACKAGE_ROOT"
   vg_validate_source_history
-  (cd -- "$PACKAGE_ROOT" && npm ci --ignore-scripts --cache "$stage/cache/npm" && npm run build) || vg_die '소스 빌드에 실패했습니다. 기존 설치는 유지됩니다.'
+  # Keep cleanup provenance even if this update's npm/build later fails. The
+  # existing extension payload stays intact until the replacement is ready.
+  if [ -d "$target" ]; then vg_write_source_history "$target"; fi
+  (
+    cd -- "$PACKAGE_ROOT"
+    # Both npm commands and any npm subprocesses in the build must keep their
+    # cache/debug logs with this installation, regardless of user npm config.
+    export npm_config_cache="$stage/cache/npm" NPM_CONFIG_CACHE="$stage/cache/npm"
+    export npm_config_logs_dir="$stage/cache/npm/_logs" NPM_CONFIG_LOGS_DIR="$stage/cache/npm/_logs"
+    npm ci --ignore-scripts --cache "$stage/cache/npm" && npm run build --cache "$stage/cache/npm"
+  ) || vg_die '소스 빌드에 실패했습니다. 기존 설치는 유지됩니다.'
   payload="$PACKAGE_ROOT/dist"
 else
   vg_die 'extension 폴더가 있는 릴리스 또는 Video Grabber 소스 폴더에서 실행해 주세요.'
