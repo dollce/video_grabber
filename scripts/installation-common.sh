@@ -296,13 +296,19 @@ vg_verify_package() {
 }
 
 vg_open_chrome() {
-  local url="$1"
+  local url="$1" browser=''
   case "$(uname -s)" in
     Darwin) open -a 'Google Chrome' "$url" >/dev/null 2>&1 || vg_note "Chrome에서 직접 열어 주세요: $url" ;;
     Linux)
-      if command -v google-chrome >/dev/null 2>&1; then google-chrome "$url" >/dev/null 2>&1 &
-      elif command -v chromium >/dev/null 2>&1; then chromium "$url" >/dev/null 2>&1 &
+      if command -v google-chrome >/dev/null 2>&1; then browser=google-chrome
+      elif command -v chromium >/dev/null 2>&1; then browser=chromium
       else vg_note "Chrome에서 직접 열어 주세요: $url"
+      fi
+      if [ -n "$browser" ]; then
+        # A cold browser can outlive this installer. It must neither consume
+        # the removal prompt's input nor remain among cleanup's mutation jobs.
+        "$browser" "$url" </dev/null >/dev/null 2>&1 &
+        disown "$!" 2>/dev/null || true
       fi ;;
   esac
 }

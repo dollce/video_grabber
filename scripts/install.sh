@@ -22,7 +22,8 @@ cleanup() {
   trap - EXIT
   set +e
   # Foreground commands have finished before Bash dispatches signal traps;
-  # wait for any remaining shell jobs before touching files or releasing lock.
+  # wait for remaining mutation jobs before touching files or releasing lock.
+  # Browser launchers are explicitly disowned by vg_open_chrome.
   wait || true
   if [ -n "$stage" ] && [ -d "$stage" ]; then rm -rf -- "$stage"; fi
   if [ -n "$backup" ] && [ -d "$backup" ]; then

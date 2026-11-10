@@ -22,6 +22,7 @@ cleanup() {
   local status=$?
   trap - EXIT
   set +e
+  # vg_open_chrome disowns browser launchers; only mutation jobs remain here.
   wait || true
   vg_release_operation_lock
   exit "$status"

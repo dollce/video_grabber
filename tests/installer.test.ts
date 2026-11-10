@@ -130,8 +130,8 @@ type RunningInstaller = {
   child: ChildProcessWithoutNullStreams;
   done: Promise<{ code: number | null; stdout: string; stderr: string }>;
 };
-function startInstaller(bundle: string, script: 'install' | 'uninstall', target: string, env: NodeJS.ProcessEnv): RunningInstaller {
-  const child = spawn('/bin/bash', [resolve(bundle, 'scripts', `${script}.sh`), '--no-open', '--target-root', target, ...(script === 'uninstall' ? ['--browser-removed'] : [])], { env: lockingEnvironment(bundle, env) });
+function startInstaller(bundle: string, script: 'install' | 'uninstall', target: string, env: NodeJS.ProcessEnv, options: { openBrowser?: boolean; browserRemoved?: boolean } = {}): RunningInstaller {
+  const child = spawn('/bin/bash', [resolve(bundle, 'scripts', `${script}.sh`), ...(options.openBrowser ? [] : ['--no-open']), '--target-root', target, ...(script === 'uninstall' && options.browserRemoved !== false ? ['--browser-removed'] : [])], { env: lockingEnvironment(bundle, env) });
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', chunk => { stdout += chunk; });
@@ -177,6 +177,15 @@ exec "$VG_TEST_REAL_COMMAND" "$@"
 }
 async function assertNoOperationLock(root: string) {
   assert.deepEqual(await readdir(resolve(root, '.operation-locks')), [], 'operation lock metadata must be removed');
+}
+async function finishWithoutBrowserExit(running: RunningInstaller) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      running.done,
+      new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error('Installer waited for the long-running browser launcher')), 5000); }),
+    ]);
+  } finally { clearTimeout(timeout); }
 }
 
 test('release staging needs no npm, updates atomically, and uninstall removes owned payload and logs', async () => {
@@ -1023,4 +1032,71 @@ exec "$VG_TEST_REAL_MV" -- "$@"
       await assertNoOperationLock(root);
     }
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('default Linux browser launch detaches from installation and removal cleanup without consuming confirmation input', async () => {
+  const root = await temporary();
+  const operations: RunningInstaller[] = [];
+  const browserCases: string[] = [];
+  try {
+    const release = await fixture(resolve(root, 'release'));
+    const target = resolve(root, 'managed/video-grabber');
+    const bin = resolve(root, 'fake-linux-browser');
+    await mkdir(bin);
+    await writeFile(resolve(bin, 'uname'), '#!/bin/bash\nif [ "${1:-}" = -s ]; then printf "Linux\\n"; else exec "$VG_TEST_REAL_UNAME" "$@"; fi\n');
+    await writeFile(resolve(bin, 'google-chrome'), `#!/bin/bash
+set -eu
+prefix="$VG_TEST_BROWSER_ROOT/$VG_TEST_BROWSER_CASE"
+printf '%s\\n' "$$" > "$prefix.pid"
+printf '%s\\n' "$1" > "$prefix.url"
+if IFS= read -r input; then printf consumed > "$prefix.stdin"; else printf closed > "$prefix.stdin"; fi
+attempts=0
+while [ ! -e "$VG_TEST_BROWSER_ROOT/release-browsers" ] && [ "$attempts" -lt 600 ]; do
+  sleep 0.05
+  attempts=$((attempts + 1))
+done
+printf exited > "$prefix.exited"
+`);
+    for (const name of ['uname', 'google-chrome']) await chmod(resolve(bin, name), 0o700);
+    const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, VG_TEST_REAL_UNAME: realCommand('uname'), VG_TEST_BROWSER_ROOT: root };
+    async function assertBrowserAlive(name: string) {
+      await waitForFile(resolve(root, `${name}.stdin`));
+      const pid = Number((await readFile(resolve(root, `${name}.pid`), 'utf8')).trim());
+      assert.doesNotThrow(() => process.kill(pid, 0));
+      assert.equal(await readFile(resolve(root, `${name}.stdin`), 'utf8'), 'closed', 'browser stdin must be /dev/null');
+      assert.equal((await readFile(resolve(root, `${name}.url`), 'utf8')).trim(), 'chrome://extensions');
+      assert.equal(await exists(resolve(root, `${name}.exited`)), false);
+    }
+    browserCases.push('install');
+    const installing = startInstaller(release, 'install', target, { ...env, VG_TEST_BROWSER_CASE: 'install' }, { openBrowser: true });
+    operations.push(installing);
+    const installed = await finishWithoutBrowserExit(installing);
+    assert.equal(installed.code, 0, installed.stderr);
+    await assertBrowserAlive('install');
+    await assertNoOperationLock(root);
+
+    browserCases.push('removal');
+    const prompting = startInstaller(target, 'uninstall', target, { ...env, VG_TEST_BROWSER_CASE: 'removal' }, { openBrowser: true, browserRemoved: false });
+    operations.push(prompting);
+    const prompted = await finishWithoutBrowserExit(prompting);
+    assert.notEqual(prompted.code, 0, 'non-interactive removal still requires explicit browser confirmation');
+    assert.match(prompted.stdout, /Chrome에서 열기:/);
+    assert.match(prompted.stderr, /browser-removed/);
+    assert.equal(await exists(resolve(target, 'extension/manifest.json')), true);
+    await assertBrowserAlive('removal');
+    await assertNoOperationLock(root);
+
+    const removed = run(target, 'uninstall', target, ['--browser-removed']);
+    assert.equal(removed.status, 0, removed.stderr);
+    assert.equal(await exists(target), false);
+    await assertNoOperationLock(root);
+    for (const name of browserCases) await assertBrowserAlive(name);
+  } finally {
+    await writeFile(resolve(root, 'release-browsers'), 'continue');
+    await Promise.all(operations.map(operation => operation.done));
+    for (const name of browserCases) {
+      if (await exists(resolve(root, `${name}.pid`))) await waitForFile(resolve(root, `${name}.exited`));
+    }
+    await rm(root, { recursive: true, force: true });
+  }
 });
