@@ -18,6 +18,19 @@ while [ "$#" -gt 0 ]; do
     *) vg_die "알 수 없는 옵션: $1" ;;
   esac
 done
+cleanup() {
+  local status=$?
+  trap - EXIT
+  set +e
+  wait || true
+  vg_release_operation_lock
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+vg_acquire_operation_lock
 vg_validate_target "$target"
 target="$VG_TARGET"
 vg_no_managed_descendants "$target"

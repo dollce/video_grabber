@@ -4,9 +4,51 @@ VG_INSTALL_MARKER='video-grabber-install-v1'
 VG_SOURCE_MARKER='video-grabber-build-v1'
 VG_SOURCE_ROOTS=''
 VG_DIRECT_SOURCE_ROOT=''
+VG_OPERATION_LOCK=''
+VG_OPERATION_TOKEN=''
 
 vg_die() { printf 'Video Grabber: %s\n' "$*" >&2; exit 1; }
 vg_note() { printf '%s\n' "$*"; }
+
+vg_acquire_operation_lock() {
+  # One user-wide lock also serializes different targets that share source
+  # checkouts. A mkdir lock needs no platform-specific locking utility.
+  local root owner='' lock
+  if [ -n "${VIDEO_GRABBER_LOCK_ROOT:-}" ]; then
+    root="$VIDEO_GRABBER_LOCK_ROOT"
+    vg_no_symlink_ancestors "$root"
+    [ -d "$root" ] && [ -O "$root" ] || vg_die '검증용 잠금 경로는 현재 사용자가 소유한 기존 폴더여야 합니다.'
+  else root="$(cd -- /tmp && pwd -P)"
+  fi
+  lock="$root/.video-grabber-operation-$UID.lock"
+  vg_no_symlink_ancestors "$lock"
+  if ! mkdir -m 700 -- "$lock" 2>/dev/null; then
+    if [ -d "$lock" ] && [ ! -L "$lock" ] && [ -O "$lock" ] && [ -f "$lock/pid" ] && [ ! -L "$lock/pid" ]; then
+      IFS= read -r owner < "$lock/pid" || owner=''
+      if [[ ! "$owner" =~ ^[1-9][0-9]{0,9}$ ]]; then owner=''; fi
+    fi
+    [ -z "$owner" ] || vg_note "진행 중이거나 중단된 설치·제거 작업의 PID: $owner" >&2
+    vg_die "다른 설치·제거 작업의 잠금이 있어 변경하지 않습니다: $lock"
+  fi
+  VG_OPERATION_LOCK="$lock"
+  VG_OPERATION_TOKEN="$$:$RANDOM:$RANDOM"
+  printf '%s\n' "$VG_OPERATION_TOKEN" > "$lock/token"
+  printf '%s\n' "$$" > "$lock/pid"
+}
+
+vg_release_operation_lock() {
+  local lock="$VG_OPERATION_LOCK"
+  [ -n "$lock" ] || return 0
+  if [ -d "$lock" ] && [ ! -L "$lock" ] && [ -O "$lock" ] &&
+    [ -f "$lock/token" ] && [ ! -L "$lock/token" ] &&
+    [ "$(cat "$lock/token")" = "$VG_OPERATION_TOKEN" ]; then
+    # Never recursively remove a lock or erase another operation's metadata.
+    rm -f -- "$lock/pid" "$lock/token"
+    rmdir -- "$lock" || vg_note "잠금 폴더에 예상하지 못한 파일이 남았습니다: $lock" >&2
+  else vg_note "잠금 소유 정보를 확인할 수 없어 보존했습니다: $lock" >&2
+  fi
+  VG_OPERATION_LOCK=''
+}
 
 vg_default_target() {
   case "$(uname -s)" in

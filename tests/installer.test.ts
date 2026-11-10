@@ -1,14 +1,25 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, rmdir, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-async function temporary() { return mkdtemp(resolve(await realpath(tmpdir()), 'video-grabber-installer-')); }
+const testRoots: string[] = [];
+async function temporary() {
+  const root = await mkdtemp(resolve(await realpath(tmpdir()), 'video-grabber-installer-'));
+  await mkdir(resolve(root, '.operation-locks'));
+  testRoots.push(root);
+  return root;
+}
+function lockingEnvironment(path: string, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const root = testRoots.find(candidate => path.startsWith(`${candidate}/`));
+  assert.ok(root, 'each installer process must use its isolated test lock directory');
+  return { ...env, VIDEO_GRABBER_LOCK_ROOT: resolve(root, '.operation-locks') };
+}
 async function exists(path: string) { try { await lstat(path); return true; } catch { return false; } }
 async function fixture(root: string) {
   const bundle = resolve(root, 'bundle');
@@ -34,7 +45,7 @@ async function checksums(root: string) {
   await writeFile(resolve(root, 'SHA256SUMS'), lines.join('\n') + '\n');
 }
 function run(bundle: string, script: 'install' | 'uninstall', target: string, options: string[] = []) {
-  return spawnSync('/bin/bash', [resolve(bundle, 'scripts', `${script}.sh`), '--no-open', '--target-root', target, ...options], { encoding: 'utf8' });
+  return spawnSync('/bin/bash', [resolve(bundle, 'scripts', `${script}.sh`), '--no-open', '--target-root', target, ...options], { encoding: 'utf8', env: lockingEnvironment(bundle) });
 }
 async function sourceFixture(root: string, name: string) {
   const bundle = await fixture(resolve(root, name));
@@ -58,7 +69,7 @@ async function fakeNpm(root: string) {
 }
 function installSource(bundle: string, target: string, bin: string) {
   return spawnSync('/bin/bash', [resolve(bundle, 'scripts/install.sh'), '--no-open', '--target-root', target], {
-    encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+    encoding: 'utf8', env: lockingEnvironment(bundle, { ...process.env, PATH: `${bin}:${process.env.PATH}` }),
   });
 }
 async function assertSourcePreserved(path: string) {
@@ -106,7 +117,7 @@ async function isolatedNpmEnvironment(root: string) {
   };
 }
 function installWithNpm(source: string, target: string, env: NodeJS.ProcessEnv) {
-  return spawnSync('/bin/bash', [resolve(source, 'scripts/install.sh'), '--no-open', '--target-root', target], { encoding: 'utf8', env });
+  return spawnSync('/bin/bash', [resolve(source, 'scripts/install.sh'), '--no-open', '--target-root', target], { encoding: 'utf8', env: lockingEnvironment(source, env) });
 }
 async function assertExternalNpmUntouched(root: string) {
   for (const name of ['external-npm-cache', 'external-npm-logs']) {
@@ -114,6 +125,58 @@ async function assertExternalNpmUntouched(root: string) {
     assert.deepEqual(await readdir(path), ['keep.txt']);
     assert.equal(await readFile(resolve(path, 'keep.txt'), 'utf8'), 'unrelated');
   }
+}
+type RunningInstaller = {
+  child: ChildProcessWithoutNullStreams;
+  done: Promise<{ code: number | null; stdout: string; stderr: string }>;
+};
+function startInstaller(bundle: string, script: 'install' | 'uninstall', target: string, env: NodeJS.ProcessEnv): RunningInstaller {
+  const child = spawn('/bin/bash', [resolve(bundle, 'scripts', `${script}.sh`), '--no-open', '--target-root', target, ...(script === 'uninstall' ? ['--browser-removed'] : [])], { env: lockingEnvironment(bundle, env) });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', chunk => { stdout += chunk; });
+  child.stderr.on('data', chunk => { stderr += chunk; });
+  const done = new Promise<{ code: number | null; stdout: string; stderr: string }>((resolveResult, reject) => {
+    child.on('error', reject);
+    child.on('close', code => resolveResult({ code, stdout, stderr }));
+  });
+  return { child, done };
+}
+async function waitForFile(path: string) {
+  const deadline = Date.now() + 10_000;
+  while (!await exists(path)) {
+    if (Date.now() > deadline) throw new Error(`Timed out waiting for deterministic process barrier: ${path}`);
+    await new Promise(resolveDelay => setTimeout(resolveDelay, 10));
+  }
+}
+function realCommand(name: string) {
+  const result = spawnSync('/bin/sh', ['-c', 'command -v "$1"', 'sh', name], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout.trim();
+}
+async function barrierTool(root: string, command: string, real = realCommand(command), argument = '') {
+  const directory = resolve(root, `barrier-${command}`);
+  const ready = resolve(root, `${command}-ready`);
+  const release = resolve(root, `${command}-release`);
+  await mkdir(directory);
+  await writeFile(resolve(directory, command), `#!/bin/bash
+set -eu
+if [ -z "$VG_TEST_BARRIER_ARGUMENT" ] || [ "\${1:-}" = "$VG_TEST_BARRIER_ARGUMENT" ]; then
+  printf '%s\\n' "$$" > "$VG_TEST_READY"
+  attempts=0
+  while [ ! -e "$VG_TEST_RELEASE" ] && [ "$attempts" -lt 400 ]; do
+    sleep 0.025
+    attempts=$((attempts + 1))
+  done
+  [ -e "$VG_TEST_RELEASE" ] || exit 97
+fi
+exec "$VG_TEST_REAL_COMMAND" "$@"
+`);
+  await chmod(resolve(directory, command), 0o700);
+  return { ready, release, env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, VG_TEST_READY: ready, VG_TEST_RELEASE: release, VG_TEST_REAL_COMMAND: real, VG_TEST_BARRIER_ARGUMENT: argument } };
+}
+async function assertNoOperationLock(root: string) {
+  assert.deepEqual(await readdir(resolve(root, '.operation-locks')), [], 'operation lock metadata must be removed');
 }
 
 test('release staging needs no npm, updates atomically, and uninstall removes owned payload and logs', async () => {
@@ -254,7 +317,7 @@ test('installed uninstaller verifies recorded source ownership and removes its b
     await chmod(resolve(bin, 'npm'), 0o700);
     const target = resolve(root, 'managed/video-grabber');
     const installed = spawnSync('/bin/bash', [resolve(bundle, 'scripts/install.sh'), '--no-open', '--target-root', target], {
-      encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+      encoding: 'utf8', env: lockingEnvironment(bundle, { ...process.env, PATH: `${bin}:${process.env.PATH}` }),
     });
     assert.equal(installed.status, 0, installed.stderr);
     assert.match(await readFile(resolve(bundle, 'npm-invocations.txt'), 'utf8'), /ci --ignore-scripts --cache/);
@@ -298,7 +361,7 @@ test('source installs reject destinations inside the checkout before npm or stag
       await writeFile(resolve(target, '.video-grabber-owned'), 'video-grabber-install-v1\n');
       await writeFile(resolve(target, 'previous-install.bin'), 'keep this installed payload');
       const result = spawnSync('/bin/bash', [resolve(bundle, 'scripts/install.sh'), '--no-open', '--target-root', target], {
-        encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+        encoding: 'utf8', env: lockingEnvironment(bundle, { ...process.env, PATH: `${bin}:${process.env.PATH}` }),
       });
       assert.notEqual(result.status, 0, artifact);
       assert.match(result.stderr, /소스 체크아웃 밖/, artifact);
@@ -752,5 +815,212 @@ test('installations cannot hide in another owned source and historical nested pa
     await assertSourceCleaned(sourceB);
     assert.equal(run(targetA, 'uninstall', targetA, ['--browser-removed']).status, 0);
     await assertSourceCleaned(sourceA);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('parallel release first installs fail fast under one lock without nesting staging directories', async () => {
+  const root = await temporary();
+  const barrier = await barrierTool(root, 'cp');
+  let first: RunningInstaller | undefined;
+  try {
+    const release = await fixture(resolve(root, 'release'));
+    const target = resolve(root, 'managed/video-grabber');
+    first = startInstaller(release, 'install', target, barrier.env);
+    await waitForFile(barrier.ready);
+    const alias = resolve(root, 'MANAGED/video-grabber');
+    const contender = run(release, 'install', await exists(dirname(alias)) ? alias : target);
+    assert.notEqual(contender.status, 0);
+    assert.match(contender.stderr, /다른 설치·제거 작업의 잠금/);
+    assert.equal(await exists(target), false, 'only the owner may publish');
+    await writeFile(barrier.release, 'continue');
+    const completed = await first.done;
+    assert.equal(completed.code, 0, completed.stderr);
+    assert.deepEqual((await readdir(target)).filter(name => name.startsWith('.video-grabber-stage.')), []);
+    assert.equal(await exists(resolve(target, '.video-grabber-publication')), false);
+    await assertNoOperationLock(root);
+    assert.equal(run(release, 'install', target).status, 0, 'a later update succeeds');
+    assert.equal(run(target, 'uninstall', target, ['--browser-removed']).status, 0);
+    await assertNoOperationLock(root);
+  } finally {
+    await writeFile(barrier.release, 'continue');
+    if (first) await first.done;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('parallel source installs and cleanup of shared source targets cannot overlap', async () => {
+  const root = await temporary();
+  const bin = await fakeNpm(root);
+  const barrier = await barrierTool(root, 'npm', resolve(bin, 'npm'), 'run');
+  let active: RunningInstaller | undefined;
+  try {
+    const source = await sourceFixture(root, 'source');
+    const targetA = resolve(root, 'a/video-grabber');
+    const targetB = resolve(root, 'b/video-grabber');
+    active = startInstaller(source, 'install', targetA, barrier.env);
+    await waitForFile(barrier.ready);
+    for (const result of [installSource(source, targetA, bin), run(source, 'uninstall', targetA, ['--browser-removed'])]) {
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /다른 설치·제거 작업의 잠금/);
+    }
+    assert.equal(await exists(resolve(source, 'node_modules/installed')), true);
+    await writeFile(barrier.release, 'continue');
+    assert.equal((await active.done).code, 0);
+    await assertNoOperationLock(root);
+    await rm(barrier.ready);
+    await rm(barrier.release);
+
+    active = startInstaller(source, 'install', targetB, barrier.env);
+    await waitForFile(barrier.ready);
+    const removedA = run(targetA, 'uninstall', targetA, ['--browser-removed']);
+    assert.notEqual(removedA.status, 0);
+    assert.match(removedA.stderr, /다른 설치·제거 작업의 잠금/);
+    assert.equal(await exists(resolve(source, 'node_modules/installed')), true);
+    assert.equal(await exists(resolve(targetA, 'extension/manifest.json')), true);
+    await writeFile(barrier.release, 'continue');
+    assert.equal((await active.done).code, 0);
+    for (const target of [targetA, targetB]) assert.equal(run(target, 'uninstall', target, ['--browser-removed']).status, 0);
+    await assertSourceCleaned(source);
+    await assertNoOperationLock(root);
+  } finally {
+    await writeFile(barrier.release, 'continue');
+    if (active) await active.done;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a running uninstall holds its lock through source and target cleanup', async () => {
+  const root = await temporary();
+  const barrier = await barrierTool(root, 'rm');
+  let active: RunningInstaller | undefined;
+  try {
+    const source = await sourceFixture(root, 'source');
+    const release = await fixture(resolve(root, 'release'));
+    const bin = await fakeNpm(root);
+    const target = resolve(root, 'managed/video-grabber');
+    assert.equal(installSource(source, target, bin).status, 0);
+    active = startInstaller(target, 'uninstall', target, barrier.env);
+    await waitForFile(barrier.ready);
+    const contender = run(release, 'install', target);
+    assert.notEqual(contender.status, 0);
+    assert.match(contender.stderr, /다른 설치·제거 작업의 잠금/);
+    assert.equal(await exists(resolve(target, 'extension/manifest.json')), true);
+    await writeFile(barrier.release, 'continue');
+    const completed = await active.done;
+    assert.equal(completed.code, 0, completed.stderr);
+    assert.equal(await exists(target), false);
+    await assertSourceCleaned(source);
+    await assertNoOperationLock(root);
+  } finally {
+    await writeFile(barrier.release, 'continue');
+    if (active) await active.done;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('TERM waits for an active build child and cleanup before releasing the operation lock', async () => {
+  const root = await temporary();
+  const bin = await fakeNpm(root);
+  const barrier = await barrierTool(root, 'npm', resolve(bin, 'npm'), 'run');
+  let active: RunningInstaller | undefined;
+  try {
+    const source = await sourceFixture(root, 'source');
+    const target = resolve(root, 'managed/video-grabber');
+    assert.equal(installSource(source, target, bin).status, 0);
+    active = startInstaller(source, 'install', target, barrier.env);
+    await waitForFile(barrier.ready);
+    assert.equal(active.child.kill('SIGTERM'), true);
+    await new Promise(resolveDelay => setTimeout(resolveDelay, 100));
+    assert.equal(active.child.exitCode, null, 'parent must wait for its build command');
+    const childPid = Number((await readFile(barrier.ready, 'utf8')).trim());
+    assert.doesNotThrow(() => process.kill(childPid, 0));
+    const contender = run(target, 'uninstall', target, ['--browser-removed']);
+    assert.notEqual(contender.status, 0);
+    assert.match(contender.stderr, /다른 설치·제거 작업의 잠금/);
+    await writeFile(barrier.release, 'continue');
+    const completed = await active.done;
+    assert.equal(completed.code, 143, completed.stderr);
+    assert.equal(await exists(resolve(source, 'dist/manifest.json')), true, 'child finished before lock release');
+    assert.deepEqual(await readdir(dirname(target)), ['video-grabber'], 'staging was removed while lock was held');
+    await assertNoOperationLock(root);
+    assert.equal(run(target, 'uninstall', target, ['--browser-removed']).status, 0);
+    await assertSourceCleaned(source);
+    await assertNoOperationLock(root);
+  } finally {
+    await writeFile(barrier.release, 'continue');
+    if (active) await active.done;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('SIGKILL leaves a fail-closed lock until explicit recovery after children finish', async () => {
+  const root = await temporary();
+  const bin = await fakeNpm(root);
+  const barrier = await barrierTool(root, 'npm', resolve(bin, 'npm'), 'run');
+  let active: RunningInstaller | undefined;
+  try {
+    const source = await sourceFixture(root, 'source');
+    const target = resolve(root, 'managed/video-grabber');
+    active = startInstaller(source, 'install', target, barrier.env);
+    await waitForFile(barrier.ready);
+    assert.equal(active.child.kill('SIGKILL'), true);
+    await writeFile(barrier.release, 'continue');
+    assert.equal((await active.done).code, null);
+    const lock = resolve(root, '.operation-locks', `.video-grabber-operation-${process.getuid!()}.lock`);
+    const token = await readFile(resolve(lock, 'token'), 'utf8');
+    const refused = run(source, 'uninstall', target, ['--browser-removed']);
+    assert.notEqual(refused.status, 0);
+    assert.match(refused.stderr, /다른 설치·제거 작업의 잠금/);
+    assert.equal(await readFile(resolve(lock, 'token'), 'utf8'), token, 'dead owners are never reclaimed automatically');
+    for (const invalidPid of ['not-a-numeric-pid', '0', '99999999999999999999']) {
+      await writeFile(resolve(lock, 'pid'), `${invalidPid}\n`);
+      const invalid = run(source, 'uninstall', target, ['--browser-removed']);
+      assert.notEqual(invalid.status, 0);
+      assert.doesNotMatch(invalid.stderr, /작업의 PID:/);
+      assert.equal(await readFile(resolve(lock, 'token'), 'utf8'), token);
+    }
+    // The terminated process's child pipes have closed. Model documented
+    // manual recovery, deleting only the two known files and empty lock.
+    await rm(resolve(lock, 'pid'));
+    await rm(resolve(lock, 'token'));
+    await rmdir(lock);
+    assert.equal(run(source, 'uninstall', target, ['--browser-removed']).status, 0);
+    await assertSourceCleaned(source);
+    await assertNoOperationLock(root);
+  } finally {
+    await writeFile(barrier.release, 'continue');
+    if (active) await active.done;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('publication detects an external destination race and preserves the prior installation backup', async () => {
+  const root = await temporary();
+  try {
+    const release = await fixture(resolve(root, 'release'));
+    const bin = resolve(root, 'racing-mv');
+    await mkdir(bin);
+    await writeFile(resolve(bin, 'mv'), `#!/bin/bash
+set -eu
+if [ "\${1:-}" = -- ]; then shift; fi
+case "\${1##*/}" in
+  .video-grabber-stage.*) mkdir -p -- "$2"; printf external > "$2/external.txt" ;;
+esac
+exec "$VG_TEST_REAL_MV" -- "$@"
+`);
+    await chmod(resolve(bin, 'mv'), 0o700);
+    for (const existing of [false, true]) {
+      const target = resolve(root, existing ? 'update/video-grabber' : 'first/video-grabber');
+      if (existing) assert.equal(run(release, 'install', target).status, 0);
+      const failed = await startInstaller(release, 'install', target, { ...process.env, PATH: `${bin}:${process.env.PATH}`, VG_TEST_REAL_MV: realCommand('mv') }).done;
+      assert.notEqual(failed.code, 0);
+      assert.match(failed.stderr, /동시에 변경/);
+      assert.deepEqual(await readdir(target), ['external.txt'], 'our accidentally nested stage is removed');
+      assert.equal(await readFile(resolve(target, 'external.txt'), 'utf8'), 'external');
+      const backups = (await readdir(dirname(target))).filter(name => name.startsWith('.video-grabber-backup.'));
+      assert.equal(backups.length, existing ? 1 : 0);
+      if (existing) assert.equal(await exists(resolve(dirname(target), backups[0], 'installation/extension/manifest.json')), true, 'original payload is retained for recovery');
+      await assertNoOperationLock(root);
+    }
   } finally { await rm(root, { recursive: true, force: true }); }
 });

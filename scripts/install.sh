@@ -15,6 +15,33 @@ while [ "$#" -gt 0 ]; do
     *) vg_die "알 수 없는 옵션: $1" ;;
   esac
 done
+stage=''
+backup=''
+cleanup() {
+  local status=$?
+  trap - EXIT
+  set +e
+  # Foreground commands have finished before Bash dispatches signal traps;
+  # wait for any remaining shell jobs before touching files or releasing lock.
+  wait || true
+  if [ -n "$stage" ] && [ -d "$stage" ]; then rm -rf -- "$stage"; fi
+  if [ -n "$backup" ] && [ -d "$backup" ]; then
+    if [ ! -e "$target" ] && [ ! -L "$target" ] && [ -d "$backup/installation" ]; then
+      mv -- "$backup/installation" "$target" || true
+    fi
+    if [ -d "$backup/installation" ]; then
+      vg_note "기존 설치 복구본을 보존했습니다: $backup/installation" >&2
+    else rmdir -- "$backup" || true
+    fi
+  fi
+  vg_release_operation_lock
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+vg_acquire_operation_lock
 vg_validate_target "$target"
 target="$VG_TARGET"
 vg_no_managed_ancestors "$target"
@@ -37,15 +64,6 @@ parent="${target%/*}"
 mkdir -p -- "$parent"
 vg_no_symlink_ancestors "$parent"
 stage="$(mktemp -d "$parent/.video-grabber-stage.XXXXXX")"
-backup=''
-cleanup() {
-  if [ -n "$stage" ] && [ -d "$stage" ]; then rm -rf -- "$stage"; fi
-  if [ -n "$backup" ] && [ -d "$backup" ]; then
-    if [ ! -e "$target" ] && [ -d "$backup/installation" ]; then mv -- "$backup/installation" "$target"; fi
-    rm -rf -- "$backup"
-  fi
-}
-trap cleanup EXIT
 mkdir -p -- "$stage/logs" "$stage/cache" "$stage/scripts"
 printf '%s\n' "$VG_INSTALL_MARKER" > "$stage/.video-grabber-owned"
 printf '%s\n' 'Video Grabber installation started.' > "$stage/logs/install.log"
@@ -87,7 +105,19 @@ if [ -d "$target" ]; then
   backup="$(mktemp -d "$parent/.video-grabber-backup.XXXXXX")"
   mv -- "$target" "$backup/installation"
 fi
+[ ! -e "$target" ] && [ ! -L "$target" ] || vg_die '설치 경로가 변경되어 파일 게시를 중단했습니다.'
+printf '%s\n' "$VG_OPERATION_TOKEN" > "$stage/.video-grabber-publication"
 mv -- "$stage" "$target"
+if [ ! -f "$target/.video-grabber-publication" ] || [ -L "$target/.video-grabber-publication" ] ||
+  [ "$(cat "$target/.video-grabber-publication")" != "$VG_OPERATION_TOKEN" ]; then
+  # A non-cooperating external writer may have created the destination after
+  # the absence check. Remove only our accidentally nested stage, then fail.
+  nested="$target/${stage##*/}"
+  if [ -f "$nested/.video-grabber-publication" ] && [ ! -L "$nested/.video-grabber-publication" ] &&
+    [ "$(cat "$nested/.video-grabber-publication")" = "$VG_OPERATION_TOKEN" ]; then rm -rf -- "$nested"; fi
+  vg_die '설치 경로가 동시에 변경되어 파일 게시를 중단했습니다.'
+fi
+rm -- "$target/.video-grabber-publication"
 stage=''
 printf '%s\n' 'Package staging complete; Chrome user confirmation is still required.' >> "$target/logs/install.log"
 if [ -n "$backup" ]; then rm -rf -- "$backup"; backup=''; fi
