@@ -75,8 +75,13 @@ elif vg_project_files "$PACKAGE_ROOT"; then
   vg_note '소스에서 고정된 의존성으로 빌드합니다. 릴리스 ZIP은 이 단계가 필요하지 않습니다.'
   command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 || vg_die '소스 빌드에는 Node.js 22 이상과 npm이 필요합니다. 도구 설치 없이 사용하려면 릴리스 ZIP을 받으세요.'
   node -e 'if (Number(process.versions.node.split(".")[0]) < 22) process.exit(1)' || vg_die 'Node.js 22 이상이 필요합니다.'
+  # Validate prospective ownership and the complete history before creating a
+  # marker. Refused aliases, unsafe artifacts or overlapping roots change none.
+  VG_PENDING_SOURCE_ROOT="$PACKAGE_ROOT"
+  vg_add_source_root "$PACKAGE_ROOT" 0
+  vg_validate_source_history
   vg_mark_source "$PACKAGE_ROOT"
-  vg_add_source_root "$PACKAGE_ROOT"
+  VG_PENDING_SOURCE_ROOT=''
   vg_validate_source_history
   # Keep cleanup provenance even if this update's npm/build later fails. The
   # existing extension payload stays intact until the replacement is ready.

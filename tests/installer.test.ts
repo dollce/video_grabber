@@ -1100,3 +1100,174 @@ printf exited > "$prefix.exited"
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('source case-alias reinstall preserves verified ownership and the original history path', async (context) => {
+  const root = await temporary();
+  try {
+    const source = await sourceFixture(root, 'source');
+    const alias = resolve(root, 'SOURCE/BUNDLE');
+    if (!await exists(alias)) return context.skip('The temporary filesystem distinguishes case aliases.');
+    const bin = await fakeNpm(root);
+    const target = resolve(root, 'managed/video-grabber');
+    assert.equal(installSource(source, target, bin).status, 0);
+    const marker = resolve(source, '.video-grabber-build-root');
+    const original = await readFile(marker);
+    const identity = await lstat(marker);
+    for (const spelling of [alias, source]) {
+      const updated = installSource(spelling, target, bin);
+      assert.equal(updated.status, 0, updated.stderr);
+      assert.deepEqual(await readFile(marker), original);
+      assert.equal((await lstat(marker)).ino, identity.ino);
+      assert.equal((await lstat(marker)).mtimeMs, identity.mtimeMs, 'verified marker must not be rewritten');
+      assert.equal(await readFile(resolve(target, 'source-roots.txt'), 'utf8'), `${source}\n`);
+    }
+    const removed = run(target, 'uninstall', target, ['--browser-removed']);
+    assert.equal(removed.status, 0, removed.stderr);
+    await assertSourceCleaned(source);
+    await assertNoOperationLock(root);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('case aliases across targets and recorded history deduplicate by directory identity', async (context) => {
+  const root = await temporary();
+  try {
+    const source = await sourceFixture(root, 'source');
+    const alias = resolve(root, 'SOURCE/BUNDLE');
+    if (!await exists(alias)) return context.skip('The temporary filesystem distinguishes case aliases.');
+    const bin = await fakeNpm(root);
+    const targetA = resolve(root, 'a/video-grabber');
+    const targetB = resolve(root, 'b/video-grabber');
+    assert.equal(installSource(source, targetA, bin).status, 0);
+    const originalMarker = await readFile(resolve(source, '.video-grabber-build-root'));
+    const installedB = installSource(alias, targetB, bin);
+    assert.equal(installedB.status, 0, installedB.stderr);
+    assert.deepEqual(await readFile(resolve(source, '.video-grabber-build-root')), originalMarker);
+    await writeFile(resolve(targetA, 'source-roots.txt'), `${source}\n${alias}\n${source}\n`);
+    const updated = installSource(alias, targetA, bin);
+    assert.equal(updated.status, 0, updated.stderr);
+    assert.equal(await readFile(resolve(targetA, 'source-roots.txt'), 'utf8'), `${source}\n`);
+    const removedA = run(alias, 'uninstall', targetA, ['--browser-removed']);
+    assert.equal(removedA.status, 0, removedA.stderr);
+    await assertSourceCleaned(source);
+    const removedB = run(targetB, 'uninstall', targetB, ['--browser-removed']);
+    assert.equal(removedB.status, 0, removedB.stderr);
+    assert.equal(await exists(targetA), false);
+    assert.equal(await exists(targetB), false);
+    await assertSourceCleaned(source);
+    await assertNoOperationLock(root);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('source ownership keeps distinct directories separate including case-distinct filesystems', async () => {
+  const root = await temporary();
+  try {
+    const sourceA = await sourceFixture(root, 'source');
+    const sourceB = await sourceFixture(root, await exists(resolve(root, 'SOURCE/bundle')) ? 'source-copy' : 'SOURCE');
+    const bin = await fakeNpm(root);
+    const targetA = resolve(root, 'a/video-grabber');
+    const targetB = resolve(root, 'b/video-grabber');
+    assert.equal(installSource(sourceA, targetA, bin).status, 0);
+    const foreignMarker = await readFile(resolve(sourceA, '.video-grabber-build-root'));
+    await writeFile(resolve(sourceB, '.video-grabber-build-root'), foreignMarker);
+    assert.notEqual(installSource(sourceB, targetB, bin).status, 0);
+    assert.deepEqual(await readFile(resolve(sourceB, '.video-grabber-build-root')), foreignMarker);
+    assert.equal(await exists(resolve(sourceB, 'npm-invocations.txt')), false);
+    await rm(resolve(sourceB, '.video-grabber-build-root'));
+    const updated = installSource(sourceB, targetA, bin);
+    assert.equal(updated.status, 0, updated.stderr);
+    assert.equal(await readFile(resolve(targetA, 'source-roots.txt'), 'utf8'), `${sourceA}\n${sourceB}\n`);
+    assert.equal(run(targetA, 'uninstall', targetA, ['--browser-removed']).status, 0);
+    await assertSourceCleaned(sourceA);
+    await assertSourceCleaned(sourceB);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('invalid existing source markers and recorded symlink paths are preserved before install or direct cleanup', async () => {
+  const root = await temporary();
+  try {
+    const source = await sourceFixture(root, 'source');
+    const foreign = await sourceFixture(root, 'foreign');
+    const release = await fixture(resolve(root, 'release'));
+    const bin = await fakeNpm(root);
+    const target = resolve(root, 'managed/video-grabber');
+    assert.equal(run(release, 'install', target).status, 0);
+    await mkdir(resolve(source, 'node_modules'));
+    await writeFile(resolve(source, 'node_modules/keep.txt'), 'unowned dependency');
+    const link = resolve(root, 'source-link');
+    await symlink(source, link);
+    const marker = resolve(source, '.video-grabber-build-root');
+    async function expectRefusal() {
+      assert.notEqual(installSource(source, target, bin).status, 0);
+      assert.notEqual(run(source, 'uninstall', target, ['--browser-removed']).status, 0);
+      assert.equal(await exists(resolve(source, 'npm-invocations.txt')), false);
+      assert.equal(await readFile(resolve(source, 'node_modules/keep.txt'), 'utf8'), 'unowned dependency');
+      assert.equal(await exists(resolve(target, 'extension/manifest.json')), true);
+      assert.equal(await exists(resolve(target, 'source-roots.txt')), false);
+      await assertSourcePreserved(source);
+      await assertNoOperationLock(root);
+    }
+    for (const text of [
+      `foreign-marker\n${source}\n`, `video-grabber-build-v1\n${foreign}\n`,
+      `video-grabber-build-v1\n${source}\nextra\n`, `video-grabber-build-v1\n${source}\n\n`,
+      `video-grabber-build-v1\n${source}\r\n`, `video-grabber-build-v1\n${source}`,
+      'video-grabber-build-v1\nrelative/path\n', 'video-grabber-build-v1\n\n',
+      `video-grabber-build-v1\n${link}\n`, `video-grabber-build-v1\n${source}\0\n`,
+    ]) {
+      await writeFile(marker, text);
+      await expectRefusal();
+      assert.equal(await readFile(marker, 'utf8'), text);
+    }
+    await rm(marker);
+    const outsideMarker = resolve(root, 'outside-marker');
+    await writeFile(outsideMarker, `video-grabber-build-v1\n${source}\n`);
+    await symlink(outsideMarker, marker);
+    await expectRefusal();
+    assert.equal((await lstat(marker)).isSymbolicLink(), true);
+    assert.equal(await readFile(outsideMarker, 'utf8'), `video-grabber-build-v1\n${source}\n`);
+    await rm(marker);
+    await mkdir(marker);
+    await expectRefusal();
+    assert.equal((await lstat(marker)).isDirectory(), true);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('prospective source overlap and unsafe artifacts are rejected before creating ownership markers', async () => {
+  const root = await temporary();
+  try {
+    const sourceB = await sourceFixture(root, 'outer-source');
+    const sourceA = await sourceFixture(resolve(sourceB, 'artifacts'), 'inner-source');
+    const sourceC = await sourceFixture(root, 'unsafe-source');
+    const release = await fixture(resolve(root, 'release'));
+    const bin = await fakeNpm(root);
+    const target = resolve(root, 'managed/video-grabber');
+    assert.equal(installSource(sourceA, target, bin).status, 0);
+    const refused = installSource(sourceB, target, bin);
+    assert.notEqual(refused.status, 0);
+    assert.match(refused.stderr, /다른 소스의 삭제 대상/);
+    assert.equal(await exists(resolve(sourceB, '.video-grabber-build-root')), false);
+    assert.equal(await exists(resolve(sourceB, 'npm-invocations.txt')), false);
+    assert.equal(await readFile(resolve(target, 'source-roots.txt'), 'utf8'), `${sourceA}\n`);
+    assert.equal(run(target, 'uninstall', target, ['--browser-removed']).status, 0);
+    await assertSourceCleaned(sourceA);
+    assert.equal(await exists(resolve(sourceB, '.video-grabber-build-root')), false);
+
+    const outside = resolve(root, 'outside');
+    await mkdir(outside);
+    await writeFile(resolve(outside, 'keep.txt'), 'unrelated');
+    await symlink(outside, resolve(sourceC, 'node_modules'));
+    assert.notEqual(installSource(sourceC, target, bin).status, 0);
+    assert.equal(await exists(resolve(sourceC, '.video-grabber-build-root')), false);
+    assert.equal(await readFile(resolve(outside, 'keep.txt'), 'utf8'), 'unrelated');
+    await rm(resolve(sourceC, 'node_modules'));
+    const nested = resolve(sourceC, 'artifacts/child/video-grabber');
+    assert.equal(run(release, 'install', nested).status, 0);
+    assert.notEqual(installSource(sourceC, target, bin).status, 0);
+    assert.equal(await exists(resolve(sourceC, '.video-grabber-build-root')), false);
+    assert.equal(await exists(resolve(sourceC, 'npm-invocations.txt')), false);
+    assert.equal(await exists(resolve(nested, 'extension/manifest.json')), true);
+    assert.equal(run(nested, 'uninstall', nested, ['--browser-removed']).status, 0);
+    await assertSourcePreserved(sourceB);
+    await assertSourcePreserved(sourceC);
+    await assertNoOperationLock(root);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

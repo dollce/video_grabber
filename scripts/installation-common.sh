@@ -4,6 +4,7 @@ VG_INSTALL_MARKER='video-grabber-install-v1'
 VG_SOURCE_MARKER='video-grabber-build-v1'
 VG_SOURCE_ROOTS=''
 VG_DIRECT_SOURCE_ROOT=''
+VG_PENDING_SOURCE_ROOT=''
 VG_OPERATION_LOCK=''
 VG_OPERATION_TOKEN=''
 
@@ -137,21 +138,42 @@ vg_project_files() {
     grep -Eq '"name"[[:space:]]*:[[:space:]]*"video-grabber"' "$path/package.json"
 }
 
+vg_same_directory() {
+  [ -n "$1" ] && [ -n "$2" ] && [ -d "$1" ] && [ -d "$2" ] && [ "$1" -ef "$2" ]
+}
+
 vg_mark_source() {
   local path="$1"
   vg_no_symlink_ancestors "$path"
   vg_project_files "$path" || vg_die '확인된 Video Grabber 소스 폴더가 아닙니다.'
-  [ ! -L "$path/.video-grabber-build-root" ] || vg_die '소스 소유 표시가 심볼릭 링크입니다.'
+  if [ -e "$path/.video-grabber-build-root" ] || [ -L "$path/.video-grabber-build-root" ]; then
+    vg_source_owned "$path" || vg_die '기존 소스 소유 표시가 올바르지 않아 변경하지 않습니다.'
+    return 0
+  fi
   printf '%s\n%s\n' "$VG_SOURCE_MARKER" "$path" > "$path/.video-grabber-build-root"
 }
 
 vg_source_owned() {
-  local path="$1"
+  local path="$1" version recorded
   vg_absolute_path "$path"
   vg_no_symlink_ancestors "$path"
   vg_project_files "$path" || return 1
   [ -f "$path/.video-grabber-build-root" ] && [ ! -L "$path/.video-grabber-build-root" ] || return 1
-  [ "$(cat "$path/.video-grabber-build-root")" = "$(printf '%s\n%s' "$VG_SOURCE_MARKER" "$path")" ]
+  { IFS= read -r version && IFS= read -r recorded; } < "$path/.video-grabber-build-root" || return 1
+  [ "$version" = "$VG_SOURCE_MARKER" ] || return 1
+  # Require exactly the generated two-line representation, including newlines.
+  # This also rejects extra records or NUL bytes that shell variables cannot hold.
+  printf '%s\n%s\n' "$version" "$recorded" | cmp -s "$path/.video-grabber-build-root" - || return 1
+  vg_no_symlink_ancestors "$recorded"
+  vg_same_directory "$path" "$recorded"
+}
+
+vg_source_checkout_ready() {
+  local path="$1"
+  vg_project_files "$path" || return 1
+  if [ -e "$path/.video-grabber-build-root" ] || [ -L "$path/.video-grabber-build-root" ]; then
+    vg_source_owned "$path"
+  fi
 }
 
 vg_validate_source_artifacts() {
@@ -183,7 +205,7 @@ vg_source_ready() {
 vg_has_source_root() {
   local candidate
   while IFS= read -r candidate; do
-    [ "$candidate" != "$1" ] || return 0
+    if vg_same_directory "$candidate" "$1"; then return 0; fi
   done <<< "$VG_SOURCE_ROOTS"
   return 1
 }
@@ -196,7 +218,7 @@ vg_add_source_root() {
   [ -e "$path" ] || return 0
   if [ "$require_owned" -eq 1 ]; then
     vg_source_ready "$path" || vg_die '기록된 소스 폴더의 소유 표시가 일치하지 않아 변경하지 않습니다.'
-  else vg_project_files "$path" || vg_die '확인된 Video Grabber 소스 폴더가 아닙니다.'
+  else vg_source_checkout_ready "$path" || vg_die '확인된 Video Grabber 소스 또는 소유 표시가 아닙니다.'
   fi
   vg_validate_source_artifacts "$path"
   vg_has_source_root "$path" && return 0
@@ -228,8 +250,8 @@ vg_validate_source_history() {
     [ -n "$path" ] || continue
     vg_no_symlink_ancestors "$path"
     [ -e "$path" ] || continue
-    if [ "$path" = "$VG_DIRECT_SOURCE_ROOT" ]; then
-      vg_project_files "$path" || vg_die '실행 중인 소스 폴더가 변경되어 정리를 중단했습니다.'
+    if vg_same_directory "$path" "$VG_DIRECT_SOURCE_ROOT" || vg_same_directory "$path" "$VG_PENDING_SOURCE_ROOT"; then
+      vg_source_checkout_ready "$path" || vg_die '실행 중인 소스 폴더 또는 소유 표시가 변경되어 정리를 중단했습니다.'
     else vg_source_ready "$path" || vg_die '기록된 소스 폴더의 소유 표시가 일치하지 않아 변경하지 않습니다.'
     fi
     vg_validate_source_artifacts "$path"
